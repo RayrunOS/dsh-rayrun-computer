@@ -1,0 +1,16 @@
+# Rayrun 云电脑 bundle.
+#
+# Rayrun's public site is http://rayrunos.com/; the hosted API lives at
+# https://api.rayrunos.com/v1. `baseUrl` is only the default API address: a user
+# can change it later from the 云电脑 page (设置 → 连接), which stores the choice
+# in ~/.rayrun/dsh.json and takes precedence over this value.
+- insert:
+    - id: rayrun-cloud
+      name: '@local/dsh-plugin-rayrun-computer'
+      config:
+        baseUrl: 'https://api.rayrunos.com/v1'
+        sandboxName: 'dsh-workspace'
+        agent: 'ubuntu@1'
+        cpu_cores: 2
+        memory_mb: 2048
+        autoCreate: true

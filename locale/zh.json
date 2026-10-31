@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Rayrun 云电脑",
+    "description": "在 DSH 里创建、开关并直接打开 Rayrun 云电脑的 Linux 远程桌面，也可以把命令和整段任务交给它执行。"
+  }
+}

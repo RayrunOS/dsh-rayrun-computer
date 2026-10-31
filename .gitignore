@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+
+# Local probes, temporary checks and logs
+.probe/
+.probe*
+.check/
+*.log
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Build artifacts and packed plugin tarballs
+dist/
+*.tgz
