@@ -52,9 +52,17 @@ apply(ctx, {})
 const checks = []
 const check = (name, fn) => checks.push({ name, fn })
 
-check('registers the four machine tools plus rayrun_dsh and rayrun_workspace', () => {
+check('registers the machine tools plus rayrun_desktop, rayrun_dsh and rayrun_workspace', () => {
   const names = tools.map((tool) => tool.name).sort()
-  assert.deepEqual(names, ['rayrun_agent', 'rayrun_dsh', 'rayrun_exec', 'rayrun_files', 'rayrun_sandbox', 'rayrun_workspace'])
+  assert.deepEqual(names, [
+    'rayrun_agent',
+    'rayrun_desktop',
+    'rayrun_dsh',
+    'rayrun_exec',
+    'rayrun_files',
+    'rayrun_sandbox',
+    'rayrun_workspace',
+  ])
 })
 
 check('rayrun_workspace exposes push and pull only', () => {

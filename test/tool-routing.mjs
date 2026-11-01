@@ -118,7 +118,7 @@ check('cloud mode refuses local write and execute tools', async () => {
 })
 
 check('cloud mode still allows reads and the cloud tools', async () => {
-  for (const name of ['read', 'read_image', 'glob', 'grep', 'rayrun_exec', 'rayrun_files', 'rayrun_dsh', 'rayrun_workspace']) {
+  for (const name of ['read', 'read_image', 'glob', 'grep', 'rayrun_exec', 'rayrun_desktop', 'rayrun_files', 'rayrun_dsh', 'rayrun_workspace']) {
     assert.equal(denial(name, 's1'), undefined, `${name} should stay usable in cloud mode`)
   }
 })

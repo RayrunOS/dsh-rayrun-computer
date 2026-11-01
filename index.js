@@ -3,7 +3,7 @@
  *
  * Two surfaces share one Rayrun client:
  *  - the 云电脑 page, through a same-origin `/plugins/rayrun/rpc` route;
- *  - four model-facing tools that create/execute on the same cloud machines.
+ *  - seven model-facing tools that create/execute on the same cloud machines.
  *
  * The Rest client and connection resolution live in ./lib/rayrun.js.
  */
@@ -27,6 +27,7 @@ import { fileURLToPath } from 'node:url'
 import { exportProfileProjection, readCloudWorker, readPluginFiles, syncCloudWorker } from './lib/cloud-dsh.js'
 import { pullWorkspace, pushWorkspace, cloudWorkspaceRoot, readCloudState } from './lib/cloud-workspace.js'
 import { delegateTask } from './lib/delegate.js'
+import { DESKTOP_ACTIONS, buildDesktopCommand, decodeScreenshot, desktopFailure } from './lib/desktop.js'
 import { isFinished, kindOf, readFrame, sseFrames } from './lib/sse.js'
 import { WorkspaceLocks } from './lib/workspace-lock.js'
 
@@ -1370,6 +1371,162 @@ export function apply(ctx, config) {
       title: 'Rayrun exec',
       description: clamp(String(args.command ?? (args.argv ?? []).join(' ')), 200),
       cwd: args.cwd,
+    }),
+  })
+
+  /**
+   * A screenshot is useless to a model that cannot see it: say so here rather
+   * than attaching an image the current route will drop.
+   */
+  const assertImageInput = async (scope, exec, where) => {
+    const llm = typeof scope.get === 'function' ? scope.get('llm') : undefined
+    const route = exec?.agent?.session?.requestHeader?.()?.config
+    const provider = route?.provider ?? exec?.agent?.options?.provider
+    const model = route?.model ?? exec?.agent?.options?.model
+    if (!llm || typeof llm.resolveModelInfo !== 'function' || !provider || !model) return
+    let info
+    try {
+      info = await llm.resolveModelInfo(provider, model, exec.signal)
+    } catch {
+      return
+    }
+    if (!Array.isArray(info?.inputModalities) || info.inputModalities.includes('image')) return
+    throw new Error(
+      `${where} needs an image-capable model: "${model}" does not declare image input. Switch models, or use rayrun_exec when the screen is not needed.`,
+    )
+  }
+
+  /**
+   * Computer use: the model reads the screen and acts on it like a person. The
+   * X11 work stays inside the machine (`/bin/sh` + xdotool, see ./lib/desktop.js);
+   * the PNG rides back over the exec stdout and becomes a Harness attachment, so
+   * the model receives an image block instead of base64.
+   */
+  ctx.tools.register({
+    name: 'rayrun_desktop',
+    description:
+      'Read and drive the graphical desktop of a Rayrun cloud computer the way a person would. `screenshot` returns the screen as an image; `click`, `type`, `key` and `scroll` act on it through X11 (xdotool) at pixel coordinates; `probe` reports which desktop tools the machine has. Use it for apps and websites that have no API, on a machine created with remote_desktop. Screenshots need an image-capable model.',
+    parameters: objectSchema({
+      action: {
+        type: 'string',
+        required: true,
+        enum: [...DESKTOP_ACTIONS],
+        description: 'screenshot | click | type | key | scroll | probe.',
+      },
+      sandbox: sandboxParam,
+      x: { type: 'integer', description: 'Pointer x coordinate in screen pixels (click, scroll).' },
+      y: { type: 'integer', description: 'Pointer y coordinate in screen pixels (click, scroll).' },
+      button: {
+        type: 'string',
+        enum: ['left', 'middle', 'right'],
+        description: 'Mouse button for click. Defaults to left.',
+      },
+      count: { type: 'integer', minimum: 1, maximum: 10, description: 'Clicks to send. Defaults to 1.' },
+      text: { type: 'string', description: 'Text to type (type).' },
+      keys: {
+        type: 'string',
+        description: 'Key chord in xdotool syntax for key, e.g. "Return", "ctrl+s", "alt+Tab".',
+      },
+      direction: { type: 'string', enum: ['up', 'down'], description: 'Wheel direction for scroll. Defaults to down.' },
+      amount: { type: 'integer', minimum: 1, maximum: 20, description: 'Wheel ticks for scroll. Defaults to 3.' },
+      display: { type: 'string', description: 'X11 display. Defaults to the machine DISPLAY, then :0.' },
+    }),
+    timeoutMs: 180_000,
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['action', 'sandbox', 'detail'],
+        properties: {
+          action: { type: 'string' },
+          sandbox: { type: 'string' },
+          detail: { type: 'string' },
+          image: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['attachmentId', 'mediaType', 'bytes', 'width', 'height'],
+            properties: {
+              attachmentId: { type: 'string' },
+              mediaType: { type: 'string' },
+              bytes: { type: 'integer' },
+              width: { type: 'integer' },
+              height: { type: 'integer' },
+              name: { type: 'string' },
+            },
+          },
+        },
+      },
+      render: (_args, value) => {
+        const blocks = [{ type: 'text', text: clamp(`${value.sandbox} · ${value.action}: ${value.detail}`) }]
+        if (value.image) {
+          blocks.push({
+            type: 'image',
+            attachment: {
+              attachmentId: value.image.attachmentId,
+              mediaType: value.image.mediaType,
+              bytes: value.image.bytes,
+              width: value.image.width,
+              height: value.image.height,
+              ...(value.image.name === undefined ? {} : { name: value.image.name }),
+            },
+          })
+        }
+        return blocks
+      },
+    },
+    async execute(args, exec) {
+      const action = String(args.action)
+      // Argument checks run before any machine is resolved: a bad call costs no API trip.
+      const command = buildDesktopCommand(action, args)
+      const attachments = action === 'screenshot' && typeof ctx.get === 'function' ? ctx.get('attachments') : undefined
+      if (action === 'screenshot') {
+        if (!attachments || typeof attachments.saveImage !== 'function') {
+          throw new Error('this Harness mounts no attachment store, so a screenshot cannot reach the model; use rayrun_exec if you only need the bytes')
+        }
+        await assertImageInput(ctx, exec, 'rayrun_desktop screenshot')
+      }
+      const machine = await resolveSandbox(args.sandbox, exec.signal)
+      const sandbox = machine.name ?? machine.id
+      cancelIdleStop(machine.id)
+      let result
+      try {
+        result = await ray.exec(
+          machine.id,
+          {
+            argv: command.argv,
+            timeout_seconds: command.timeout_seconds,
+            ...(args.display ? { env: { DISPLAY: String(args.display) } } : {}),
+          },
+          { timeoutMs: (command.timeout_seconds + 30) * 1000, signal: exec.signal },
+        )
+      } finally {
+        scheduleIdleStop(machine)
+      }
+      const failure = desktopFailure(result)
+      if (failure) throw new Error(`${sandbox}: ${failure}`)
+      if (action !== 'screenshot') {
+        return { action, sandbox, detail: String(result?.stdout ?? '').trim() || `${action} sent` }
+      }
+      const data = decodeScreenshot(result?.stdout)
+      const ref = await attachments.saveImage({ data, mediaType: 'image/png', name: `${sandbox}-desktop.png` })
+      return {
+        action,
+        sandbox,
+        detail: `${data.length} B PNG`,
+        image: {
+          attachmentId: ref.attachmentId,
+          mediaType: ref.mediaType,
+          bytes: ref.bytes,
+          width: ref.width,
+          height: ref.height,
+          ...(ref.name === undefined ? {} : { name: ref.name }),
+        },
+      }
+    },
+    presentCall: (args) => ({
+      card: 'generic',
+      title: `Rayrun desktop ${args.action}${args.sandbox ? ` ${args.sandbox}` : ''}`,
+      kind: 'other',
     }),
   })
 

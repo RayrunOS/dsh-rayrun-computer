@@ -15,6 +15,7 @@
 | `lib/workspace-lock.js` | 单 writer 锁 |
 | `lib/context-pack.js` | handoff 目录的生成与 secret 拦截 |
 | `lib/delegate.js` | 委托一轮：prompt、SSE、revs 回显 |
+| `lib/desktop.js` | 桌面 computer use：X11 命令构造、截图解码、失败映射 |
 | `lib/sse.js` | SSE 解析 |
 | `client.js` | Client 半区：侧边栏云电脑页、连接设置、输入区「云上 / 本地」切换 |
 | `cordis.patch.yml` | bundle 插入行；`name` 必须与包名一致 |
@@ -31,6 +32,7 @@ node --check lib/cloud-workspace.js
 node --check lib/workspace-lock.js
 node --check lib/context-pack.js
 node --check lib/delegate.js
+node --check lib/desktop.js
 node --check lib/sse.js
 node --check lib/update.js
 node --check client.js
@@ -47,6 +49,7 @@ node test/cloud-workspace.mjs   # 云端 workspace 解析、路径规则、push 
 node test/workspace-lock.mjs    # 单 writer 锁的获取/释放/冲突
 node test/context-pack.mjs      # handoff 目录结构与 secret 拦截
 node test/cloud-tool.mjs        # 用假上下文驱动真实 apply，断言 rayrun_dsh 注册形状与非法 action
+node test/desktop.mjs           # rayrun_desktop：参数校验、X11 命令构造、截图解码、图片块渲染
 node test/security.mjs          # 负向：跨源 POST、超大 body、未知 action、只读响应不含 token
 node test/tool-routing.mjs      # 云上/本地工具路由
 node test/update-unit.mjs       # 版本比较、canAutoUpdate、applyUpdate 回滚

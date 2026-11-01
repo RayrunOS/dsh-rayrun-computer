@@ -269,10 +269,28 @@ API 地址优先级：页面保存的地址（`~/.rayrun/dsh.json`）→ 插件 
 | --- | --- |
 | `rayrun_sandbox` | create / list / inspect / start / stop / pause / resume / destroy |
 | `rayrun_exec` | 执行非交互命令，返回 exit code、stdout、stderr |
+| `rayrun_desktop` | 桌面 computer use：`screenshot` 截屏、`click` / `type` / `key` / `scroll` 操作、`probe` 探测 X11 工具 |
 | `rayrun_files` | 工作区 list / upload / download |
 | `rayrun_agent` | 把整段任务交给机器内 agent，流式等待结果 |
 | `rayrun_dsh` | 云上 DSH worker：`sync` 推送并校验图层，`status` 只读比对，`delegate` 委托整段任务 |
 | `rayrun_workspace` | 工作区同步：`push` 推送并校验 HEAD/摘要，`pull` 回传 diff 供本地审阅 |
+
+## 桌面自动化（computer use）
+
+`rayrun_desktop` 让模型看屏幕并动手：`screenshot` 把 X11 桌面截成图片交给模型，`click` / `type` / `key` / `scroll` 用像素坐标和 xdotool 操作。适合没有 API 的应用和网站；前提是机器创建时开了远程桌面（`remote_desktop: true`，内存至少 2 GB）。
+
+- **先探测再动手。** `probe` 回报解析到的 `display`、`reachable`，以及 `xdotool` / `scrot` / `import` / `ffmpeg` 是否存在。exec 环境里**没有 `DISPLAY`**，桌面实际跑在 `:99`（从 `/tmp/.X11-unix` 推断，不靠 `:0`）。出厂镜像**不带** xdotool 和 scrot，要先装；但**新建机器默认没有出向网络**，得把镜像自己的 apt 源放进 `egress_allow`——实测镜像是 Ubuntu noble，源是 `mirrors.aliyun.com`：
+
+  ```bash
+  apt-get update -qq && apt-get install -y xdotool scrot   # 用 rayrun_exec 执行
+  ```
+
+- **2026-11-02 实机验证**：`deepseek-harness@1`、2 GB、开桌面，装完包后 `probe → screenshot → click → type → key` 全部通过。截图 1440×900，PNG 19–37 KB、base64 26–50 KB，离上限很远；`xdotool type` 送进去的 `$(id)` 原样显示、没有被求值。
+- **截图以图片块的形式回到模型**，所以当前模型必须声明图片输入；不是的话工具直接报错，而不是塞回一段 base64。
+- **截图上限 2.9 MB**（机器侧 stdout 截断在 4 MiB，base64 还要多三分之一）。超了会明确报错，降低桌面分辨率再试。
+- **坐标是屏幕像素**：先 `screenshot` 看清再点，动作之后通常再截一张确认。
+- **非 ASCII 输入**（中文等）受键盘布局限制，可能打不进去；这类内容优先走命令行或剪贴板。
+- 输入文本和按键都以位置参数传给 `/bin/sh -c`，不会拼进脚本文本，所以引号、分号、`$(...)` 都只是字符。
 
 ## 安全与边界
 

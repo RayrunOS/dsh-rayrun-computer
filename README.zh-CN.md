@@ -19,7 +19,7 @@
 
 - **侧边栏里的云电脑。** 选镜像、vCPU、内存（以及给机器内 agent 用的模型凭证）创建，之后开机、暂停、恢复、关机、重命名、销毁。卡片展示状态、镜像、规格、IP 和机时，顶部显示余额和累计机时。
 - **页面里的真桌面。** 创建时开启远程桌面的机器会发布 noVNC 端口，可以内嵌打开、新窗口打开或全屏；桌面密码一键取。镜像里空 `/etc/hosts` 导致 `websockify` 解析失败（WebSocket 以 1011 关闭）的问题，会在连接桌面时自动修好。
-- **给模型用的工具。** `rayrun_sandbox`、`rayrun_exec`、`rayrun_files`、`rayrun_agent`，以及云上 worker 的 `rayrun_dsh` 和 `rayrun_workspace`。
+- **给模型用的工具。** `rayrun_sandbox`、`rayrun_exec`、`rayrun_files`、`rayrun_agent`、桌面 computer use 的 `rayrun_desktop`，以及云上 worker 的 `rayrun_dsh` 和 `rayrun_workspace`。
 - **按会话切换云上 / 本地。** 输入区的切换是**真路由**，不是提示词：云上模式下 Host 直接拒绝本地 `pwsh` / `bash` / `write` / `edit`，模型没法偷偷在本地干活；只读工具仍然可用，用来审阅和汇总。
 - **和本地一致的 worker。** 往机器的 headless profile 推一层 worker 图层，用哈希校验它真的生效；把整段任务连同目标和验收标准委托过去，拿回结果，支持多轮。
 - **可核对的工作区同步。** `push` 用 git bundle 带走提交，再带脏改动和未跟踪文件，两边各自重算 patch 的 SHA-256；`pull` 只把云端 diff 写进 `.dsh/incoming/<时间戳>/`，不会自动应用。
@@ -74,6 +74,7 @@ git clone https://github.com/RayrunOS/dsh-rayrun-computer.git
 | --- | --- |
 | `rayrun_sandbox` | create · list · inspect · start · stop · pause · resume · destroy |
 | `rayrun_exec` | 执行非交互命令（`/bin/sh -c` 或 argv），返回 exit code、stdout、stderr |
+| `rayrun_desktop` | 截取桌面，并在上面点击、键入、按键、滚动（X11 / xdotool） |
 | `rayrun_files` | 列目录、上传、下载机器工作区里的文件 |
 | `rayrun_agent` | 把整段任务交给机器内的 agent，流式等待结果 |
 | `rayrun_dsh` | `sync` 推送并校验 worker 图层，`status` 只读比对，`delegate` 委托任务 |
@@ -120,6 +121,7 @@ node --check index.js
 node --check client.js
 node test/security.mjs
 node test/tool-routing.mjs
+node test/desktop.mjs
 ```
 
 没有构建步骤，也没有运行时依赖；`client.js` 只用 DSH 提供的内建模块。完整的检查与测试清单见[开发与自测](docs/development.md)。
