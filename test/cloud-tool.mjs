@@ -41,6 +41,9 @@ const ctx = {
     register(tool) {
       tools.push(tool)
     },
+    guard() {
+      return () => {}
+    },
   },
 }
 

@@ -356,6 +356,27 @@ export function apply(ctx, config) {
     )
   })
 
+  // The toggle is a route, not a hint: in 云上电脑 mode the tools that would
+  // write or execute on THIS machine are refused, so work cannot silently stay
+  // local. Reads stay allowed — reviewing and summarising input is local work.
+  const LOCAL_WRITE_TOOLS = new Set(['pwsh', 'bash', 'write', 'edit'])
+  const cloudModeDenial = (exec) => {
+    const name = String(exec?.name ?? '')
+    if (!LOCAL_WRITE_TOOLS.has(name)) return undefined
+    if (targetOf(exec?.agent?.session?.id) !== 'cloud') return undefined
+    return [
+      `「云上电脑」模式已启用，本地工具 ${name} 被禁用。`,
+      '请在云上执行：rayrun_exec（命令）、rayrun_files（单文件）、rayrun_workspace push（同步本地改动）、rayrun_dsh delegate（整段任务）。',
+      '切换回「本地电脑」才会恢复本地写入与执行。',
+    ].join(' ')
+  }
+  if (typeof ctx.tools?.guard === 'function') {
+    ctx.tools.guard(cloudModeDenial)
+  } else {
+    // Old DSH without a tool guard: the toggle stays instruction-only there.
+    console.warn('[rayrun] tools.guard is unavailable; 云上电脑 mode cannot disable local write/execute tools')
+  }
+
   const setTaskTarget = (sessionId, target) => {
     const id = String(sessionId ?? '').trim()
     if (!id) throw new LocalError('invalid_session', 'A session id is required.')

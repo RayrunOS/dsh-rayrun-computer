@@ -36,11 +36,13 @@ Rayrun 云电脑 — DeepSeek Harness 插件
 
 | 选项 | 行为 |
 | --- | --- |
-| 云上电脑 | Host 给当前会话注入一条运行位置上下文：实际执行、代码修改、构建和产物都放在 Rayrun 云电脑（默认机器名 `dsh-workspace`，不存在时由 `rayrun_sandbox` 创建）；本地只读取必要输入、查看和汇总。 |
-| 本地电脑 | 保持默认行为：按常规使用本地工具，除非用户明确要求不调用 `rayrun_*`。 |
+| 云上电脑 | 当前会话注入运行位置上下文（优先 `rayrun_dsh delegate`），**并硬性禁用本地 `pwsh` / `bash` / `write` / `edit`**：这些调用会被 Host 的 tools guard 直接拒绝，并提示改用 `rayrun_exec` / `rayrun_files` / `rayrun_workspace` / `rayrun_dsh delegate`。 |
+| 本地电脑 | 默认行为：本地工具全部可用，除非用户明确要求不调用 `rayrun_*`。 |
 
 - 选择按 **会话** 隔离，页面把选择存在 `localStorage`，Host 侧保存运行时映射；刷新/重新打开页面后控件会把选择同步回 Host。
-- 这是 **指令级路由**，不是硬隔离：两种模式下工具都仍然存在，模型按上下文选择机器；这样本地读取、上传、汇总不会被误伤。
+- 这是 **工具级路由**：云上模式下本地写入/执行被拒绝（不是提示词），模型无法悄悄留在本地干活；`read` / `glob` / `grep` / `read_image` 仍然可用，因为审阅和汇总是本地职责。
+- 被拦的只有本地写入/执行；`rayrun_*` 与委托链路不受影响（`delegate` 内部的 push 属于插件代码，不经工具层）。
+- 审阅云上回传的 diff 时，`git apply` 属于本地写入 → 需要先切回「本地电脑」，或由你自己在终端应用。
 - 「云上电脑」用 `sandboxName` 的默认机器；如果要多台机器，在「云电脑」页创建/管理，再在对话里点名机器名。
 - 未配置 Rayrun Token 时切到云上电脑，模型会明确报告工具不可用，不会假装已在云端完成。
 
@@ -334,6 +336,7 @@ node test/workspace-lock.mjs
 node test/context-pack.mjs
 node test/cloud-tool.mjs
 node test/security.mjs
+node test/tool-routing.mjs
 node test/update-unit.mjs
 node test/update-rpc.mjs
 node test/update-rpc.mjs missing

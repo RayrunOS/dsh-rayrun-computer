@@ -66,7 +66,12 @@ function hostFor() {
       if (name === 'pluginManager') return undefined
       return undefined
     },
-    tools: { register() {} },
+    tools: {
+      register() {},
+      guard() {
+        return () => {}
+      },
+    },
   }
   apply(ctx, config)
   assert.equal(routes.length, 1, 'the RPC route is registered once')

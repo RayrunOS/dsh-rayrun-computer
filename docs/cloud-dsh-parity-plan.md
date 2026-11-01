@@ -183,17 +183,20 @@ dsh --profile web --no-open --host 127.0.0.1 --port 8080   # web 只能绑 loopb
 
 ### 5.3 与当前实现的差距
 
-当前“云上电脑”只是给本地 Agent 注入一段 prompt，让它用 `rayrun_*` 工具。升级为：
+原先“云上电脑”只是给本地 Agent 注入一段 prompt。现在已经升级为**工具级路由**：
 
-- 本地 Agent 的云上任务应优先调用 **`rayrun_dsh`**（或 `rayrun_agent`）把整段任务委托给云上 DSH，而不是零散 `rayrun_exec`；
-- 委托前由插件保证 profile/workspace 已同步；
-- 结果写回本地会话；
-- 云上 DSH 不可用时明确失败，回退本地模式。
+- 云上模式下，Host 的 tools guard 直接拒绝本地 `pwsh` / `bash` / `write` / `edit`（返回明确原因并指向 `rayrun_exec` / `rayrun_files` / `rayrun_workspace` / `rayrun_dsh delegate`），所以本地不可能悄悄执行；
+- 读取类工具（`read` / `glob` / `grep` / `read_image`）保持可用，审阅与汇总仍由本地负责；
+- 委托链路改为优先 **`rayrun_dsh delegate`**：委托前自动 mirror workspace、校验/重推 profile 投影，交付 Context Pack，回显三元组并取回结果；
+- 云上不可用时明确失败，不会静默留在本地；
+- 限制：审阅后的 `git apply` 属于本地写入，需要先切回「本地电脑」或由人手动应用。
+
+同名工具的透明远端执行（把 `pwsh` / `read` / `write` 直接代理到云上）当前**没有做**：DSH 的执行绑定在注册的 definition 上，透明代理需要在 agent 作用域内影子注册同名工具并重写执行体，属于独立改造；现有「硬门禁 + 专用云工具」已经能让路由确定。
 
 ### 5.4 为什么不做云上 Web 主界面
 
 - 本地权威要求会话/配置/合并都在本地；云上 Web 会成为第二套 UI/状态；
-- 当前部署没有 ingress，云上 Web 不可达；
+- 云上 Web 需要占用桌面 ingress（见 §4.3），只适合临时排障，不适合当主界面；
 - 本地已有完整 DSH UI，没必要切换。
 
 ### 5.5 本地上下文如何交给云上 worker
