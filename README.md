@@ -312,6 +312,7 @@ sync   → synced（layer 恢复、bundle added、cloudMode applied）
 - 销毁不可恢复：机器和工作区数据一起删除。
 - 新建机器默认无出向网络；装包或调用外部 API 需显式配置 `egress_allow`。
 - `rayrun_exec` 的 `command` 走 `/bin/sh -c`，`argv` 直接 exec，二者只能给一个。
+- 云上 DSH Web 不是常驻入口：Rayrun 只能发布桌面端口 6080，且该 ingress 是 **public**。排障时可以把 6080 让给 `dsh web`，但那是 RCE 级入口，token 等同凭证，用完必须关掉——完整步骤和限制见 `docs/cloud-dsh-parity-plan.md` §4.3。
 
 ## 开发自测
 

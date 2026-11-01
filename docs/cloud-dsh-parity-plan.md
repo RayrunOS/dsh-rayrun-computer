@@ -121,11 +121,44 @@ profile-cloud/
 - 健康检查：worker 进程存在、profile hash 匹配、workspace 挂载正确、模型域名 egress 放行。
 - 崩溃重启；日志轮转；机器 stop 后 worker 停止，磁盘保留。
 
-### 4.3 云上 DSH Web（可选）
+### 4.3 云上 DSH Web（可选，实测：可做但要手动开、用完即关）
 
-- 仅用于调试/观察，不作为主界面。
-- 需要 `RAYRUN_INGRESS_DOMAIN`；发布端口用 `visibility: token`，再叠加 DSH 自身 token。
-- 没有 ingress 时不影响核心委托链路（prompt + SSE）。
+2026-11-01 实测结论（一次性机器验证后已销毁）：
+
+| 事实 | 结果 |
+| --- | --- |
+| 发布端口的 API | **不存在**：`/ingress`、`/ports`、`/expose`、`/services` 全部 404；创建时额外传 `ingress: [{port}]` 会被忽略 |
+| 唯一的 ingress | 创建时 `remote_desktop: true` 才会发布 6080，且实测 `visibility: "public"`（不是 token） |
+| `dsh web` 绑定 | 配置 schema 只接受 `127.0.0.1` / `0.0.0.0`；`0.0.0.0` 被 CLI 明确拒绝（"would expose remote code execution"），所以只能绑 loopback |
+| 网关方向 | 网关打的是 guest 私网 IP，loopback 上监听会得到 `502 no service listening on the published port` |
+
+因此可行的调试入口是「把 6080 让给 `dsh web`」：
+
+```bash
+# 机器必须创建时带 remote_desktop: true（才会发布 6080）
+rayrun-desktop stop                                   # 腾出 6080
+dsh --profile web --no-open --host 127.0.0.1 --port 8080   # web 只能绑 loopback
+# 用一个临时 TCP 转发把 10.42.0.6:6080 → 127.0.0.1:8080（约 30 行 python asyncio）
+
+# 本地打开 dsh web 日志里打印的
+# https://6080-<sandbox-id>.rayrunos.com/?token=<dsh web 打印的 token>
+```
+
+实测：带 token 访问返回 303 换 cookie，再请求 `/` 得到 200 + 完整的 DSH Web shell（约 35 KB HTML）。
+
+**安全约束（必须遵守）**
+
+- 这个入口是 **RCE 级**：能操作机器的一切；URL 是 `public`，只要有 token 谁都能用。
+- token 等同凭证：不进仓库、不进日志、用完即弃（机器销毁即失效）。
+- 只在排障时临时开；用完 kill 转发与 `dsh web`，不要让它在空闲机器上常驻。
+- 核心委托链路不依赖它（prompt + SSE），不开完全不影响 P1–P3。
+
+### 4.4 ACP / PTY 评估（决定：不做）
+
+- `dsh acp` 存在（stdio JSON-RPC），但 Rayrun 的 exec 通道不是交互式 stdio：没有持久 stdin，无法维持 ACP 会话。
+- PTY 同理：`/exec` 是一次性的命令通道，没有 pty 分配接口。
+- 现状的多轮能力由「同 `task_id` 追加 + `questions.md`」提供，已覆盖「需要本地决定就停一轮」的场景；实时人工追问没有产品价值上的必要性。
+- 结论：不引入 ACP/PTY；若将来 Rayrun 提供交互式通道，再评估。
 
 ---
 
@@ -308,7 +341,8 @@ prompt: string   (delegate 时)
 | P4：回退演练（删 profile → 模板重建 → stale → sync 恢复） | 完成 | 实测：layer 0 / plugin none → `sync` → layer 1、bundle added、cloudMode applied |
 | P4：自动 stop（可选 `idle_stop_minutes`，默认关；只 stop；有未 pull 改动跳过） | 完成 | 默认关闭；定时器随 Host 重启失效；README 有配置与行为说明 |
 | P4：多轮 delta（方案 B 窄版：同 `task_id` 追加、每轮重推并重算 revs、提问经 `questions.md` 带入下一轮） | 完成 | 实测 `task-mvxsuu1v`：round 1 产出 `questions.md` → round 2 的 handoff 带上该问题并产出 `decision.txt`，`task.json` rounds=2 |
-| P4：云上 DSH Web 调试入口 | 不做（决策） | 需要时临时开、用完关，不做常驻入口 |
+| P4：云上 DSH Web 调试入口 | 已评估（不常驻） | 端口发布 API 不存在、`dsh web` 只能绑 loopback、6080 为 public ingress；给出「6080 让给 web + 临时转发」的 runbook，实测 303→200 HTML shell |
+| P4：ACP / PTY 实时交互 | 评估后不做 | exec 非交互、无持久 stdin/pty；多轮已由 `task_id` + `questions.md` 覆盖 |
 
 因 §10 的实测结论，MVP 的第 2 步（“云上 bootstrap + 启动 worker”）不再需要：云端 agent 已经是 DSH，本地只投影它的 profile 图层。
 
