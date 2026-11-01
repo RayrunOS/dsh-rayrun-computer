@@ -144,7 +144,7 @@ plugin_manager install_bundle  target = /abs/path/to/dsh-rayrun-computer
 
 - API 地址默认 `https://api.rayrunos.com/v1`，页面不再显示。自托管用环境变量 `RAYRUN_API_URL=http://<dev-host>/v1`，或写进 `~/.rayrun/dsh.json` 的 `baseUrl`。
 - `rayrunos.com/v1` 是官网 SPA，不是 API，不要填。
-- Token 只保存在 Host 侧：页面通过同源 RPC 调用，拿不到明文。解析顺序见 [README](../README.md#连接-rayrun)。
+- Token 只保存在 Host 侧：页面通过同源 RPC 调用，拿不到明文。解析顺序见[使用手册](usage.md#token-与-api-地址)。
 - **断开连接**会尝试吊销自动创建的 Token 并清除本机凭据，但不会删除云上的机器。
 - 微信登录窗口是可见的浏览器窗口，不是静默自动化；登录完成后窗口自动关闭，临时 profile 会被清理。
 - 没有可用浏览器时，微信按钮会退化为打开 Rayrun 登录页；完成登录后回到插件手动粘贴 Token。
@@ -236,4 +236,4 @@ plugin_manager install_bundle  target = /abs/path/to/dsh-rayrun-computer
 
 ---
 
-相关文档：[README](../README.md) · [云上/本地一致性方案](cloud-dsh-parity-plan.md)
+相关文档：[README](../README.md) · [使用手册](usage.md) · [云上/本地一致性方案](cloud-dsh-parity-plan.md)

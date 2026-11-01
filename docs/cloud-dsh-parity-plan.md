@@ -342,7 +342,7 @@ prompt: string   (delegate 时)
 | P4：安全审计（负向测试：跨源、超大 body、未知 action、只读响应无 token） | 完成 | `test/security.mjs` 7/7；测试注入不存在的 `token_file`，避免本机 token 污染断言 |
 | P4：成本提示（委托回执带 `vm-h`，按 `usage.vm_hours` 前后差值） | 完成 | `lib/delegate.js` 返回 `vmHours` |
 | P4：回退演练（删 profile → 模板重建 → stale → sync 恢复） | 完成 | 实测：layer 0 / plugin none → `sync` → layer 1、bundle added、cloudMode applied |
-| P4：自动 stop（可选 `idle_stop_minutes`，默认关；只 stop；有未 pull 改动跳过） | 完成 | 默认关闭；定时器随 Host 重启失效；README 有配置与行为说明 |
+| P4：自动 stop（可选 `idle_stop_minutes`，默认关；只 stop；有未 pull 改动跳过） | 完成 | 默认关闭；定时器随 Host 重启失效；[使用手册](usage.md#自动停机可选默认关闭)有配置与行为说明 |
 | P4：多轮 delta（方案 B 窄版：同 `task_id` 追加、每轮重推并重算 revs、提问经 `questions.md` 带入下一轮） | 完成 | 实测 `task-mvxsuu1v`：round 1 产出 `questions.md` → round 2 的 handoff 带上该问题并产出 `decision.txt`，`task.json` rounds=2 |
 | P4：云上 DSH Web 调试入口 | 已评估（不常驻） | 端口发布 API 不存在、`dsh web` 只能绑 loopback、6080 为 public ingress；给出「6080 让给 web + 临时转发」的 runbook，实测 303→200 HTML shell |
 | P4：ACP / PTY 实时交互 | 评估后不做 | exec 非交互、无持久 stdin/pty；多轮已由 `task_id` + `questions.md` 覆盖 |
