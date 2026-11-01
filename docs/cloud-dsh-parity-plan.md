@@ -88,7 +88,7 @@ profile-cloud/
 2. 云上 worker 在镜像 workspace 内执行；
 3. 任务结束：云上 `git diff`/文件 tar 回传；
 4. **本地是合并权威**：本地 review/apply，冲突由本地解决；
-5. 全程单 writer lock：云上任务运行期间，本地对同一 workspace 的写操作提示冲突或排队；
+5. 全程单 writer lock：云上任务（`rayrun_agent` / `rayrun_exec`）运行期间，本地 `push` 直接拒绝（`workspace_locked`）；`force` 可强行覆盖并丢弃云端文件。锁为进程内状态，Host 重启即失效。
 6. 大文件/依赖目录排除，必要时走 Rayrun files API 分块。
 
 没有 git remote 时：tar + sha256 manifest；仍然只以本地为合并权威。
@@ -288,6 +288,30 @@ prompt: string   (delegate 时)
 
 验收：本地会话是唯一记录；云上执行同一 profile/workspace；任务结果写回本地；不需要 ingress。
 
+**已实施（2026-11-01，Phase 0 之后按实测重排）**
+
+| 项 | 状态 | 代码 / 证据 |
+| --- | --- | --- |
+| worker 图层投影：确定性 patch、来源 manifest、secret scan、`rev` | 完成 | `lib/cloud-dsh.js`、`test/cloud-profile.mjs`（8/8） |
+| 推送与回读校验：备份一次 → 上传 → `sha256sum` + `--dump-config` 校验 | 完成 | `rayrun_dsh sync` / `status` |
+| 云端 agent 在新图层下真正可用 | 完成 | 实测 `cloud-yl0w`：remote rev == local rev；agent 回报 `dsh 0.2.0-rc.2`、`pwd=/workspace`、`id -u=0` |
+| P1：本插件文件投到 `<profile>/node_modules`，加入 profile `bundles` | 完成 | 实测：插件 `rev` 一致、`bundles` 含 `dsh-rayrun-computer`、`cloudMode` 行生效 |
+| P1：`cloudMode: true`（云上不注册云电脑工具，避免递归） | 完成 | 实测：云端 agent 引用了 worker 上下文，且 `rayrun_*` 工具为 none |
+| P2：workspace push（git bundle + dirty patch + untracked，双向哈希校验） | 完成 | 实测 `dsh-workspace`：HEAD `25460c4e` 一致、dirty digest `5407ec15…` 一致、8 个 untracked |
+| P2：workspace pull（只回传、不自动应用） | 完成 | 实测：云端 +41 B 改动进入 `.dsh/incoming/<ts>/dirty.patch`，本地文件未变 |
+| P2：单 writer 锁 + 冲突策略（锁拒绝、`state.json` 偏离拒绝、force 逃生口） | 完成 | 实测：云端改动后 push 被 `workspace_drift` 拒绝；force 覆盖后稳态为 `already-mirrored`；`test/workspace-lock.mjs` 6/6 |
+| P3：Context Pack（handoff / conversation / workspace.patch / manifest / profile.json） | 完成 | `lib/context-pack.js`、`test/context-pack.mjs`（8/8，含 secret scan） |
+| P3：`rayrun_dsh delegate`（push → 校验/重推投影 → 交付 pack → SSE 聚合 → 结果回传） | 完成 | 实测 `task-mvxscyjy`：worker 回显三元组一致、产物 `.dsh/results/<taskId>/hello.txt` 取回 |
+| P3：版本三元组 + 必填清单（缺 objective/acceptance 拒绝委托） | 完成 | Host 实测 `sessionSeq=2532`；三值全匹配才算回显；`workspaceRev` 覆盖 HEAD + dirty + 未跟踪摘要 |
+| P4：安全审计（负向测试：跨源、超大 body、未知 action、只读响应无 token） | 完成 | `test/security.mjs` 7/7；测试注入不存在的 `token_file`，避免本机 token 污染断言 |
+| P4：成本提示（委托回执带 `vm-h`，按 `usage.vm_hours` 前后差值） | 完成 | `lib/delegate.js` 返回 `vmHours` |
+| P4：回退演练（删 profile → 模板重建 → stale → sync 恢复） | 完成 | 实测：layer 0 / plugin none → `sync` → layer 1、bundle added、cloudMode applied |
+| P4：自动 stop（可选 `idle_stop_minutes`，默认关；只 stop；有未 pull 改动跳过） | 完成 | 默认关闭；定时器随 Host 重启失效；README 有配置与行为说明 |
+| P4：多轮 delta（方案 B 窄版：同 `task_id` 追加、每轮重推并重算 revs、提问经 `questions.md` 带入下一轮） | 完成 | 实测 `task-mvxsuu1v`：round 1 产出 `questions.md` → round 2 的 handoff 带上该问题并产出 `decision.txt`，`task.json` rounds=2 |
+| P4：云上 DSH Web 调试入口 | 不做（决策） | 需要时临时开、用完关，不做常驻入口 |
+
+因 §10 的实测结论，MVP 的第 2 步（“云上 bootstrap + 启动 worker”）不再需要：云端 agent 已经是 DSH，本地只投影它的 profile 图层。
+
 ### P0 基线（0.5–1 天）
 
 - 云上 `dsh --version`、Node、`dsh --help`、agent entrypoint、profile 路径、prompt API 行为。
@@ -347,54 +371,97 @@ prompt: string   (delegate 时)
 
 ---
 
-## 10. Phase 0 当前探测限制
+## 10. Phase 0 结果（2026-11-01，托管集群，探针机器 `cloud-yl0w`）
 
-本次创建 `deepseek-harness@1` 探针机器时，Rayrun 本地开发集群返回：
+之前记录的 `ip tuntap` 失败属于本地开发集群；托管集群上创建与运行都正常。探针机器：`deepseek-harness@1`，2 vCPU / 4096 MB / 32 GB workspace。
 
+| 项 | 云上实测 | 本地 | 结论 |
+| --- | --- | --- | --- |
+| DSH | `0.2.0-rc.2`（`/usr/local/bin/dsh` → `@deepseek-ai/dsh` 全局安装，全部 bundle 齐备） | `0.2.1-rc.5` | 出厂镜像偏低；按白名单重建后可装成同一版本（见下节） |
+| Node | v24.22.0 | v24.21.0 | 大版本一致 |
+| agent 进程 | guest 进程表里看不到；每次 prompt 由平台在 guest 内起 `dsh --profile headless` | — | **平台 agent 就是 DSH** |
+| DSH_HOME | `/workspace/.rayrun/dsh`（在持久化 workspace 上，session 落盘于此） | `~/.dsh` | 云上 home 可写，可投影 |
+| profile | `$DSH_HOME/profiles/headless`，首次运行由模板生成；`initProfile` 只补缺失文件，**已有 profile 不被覆盖** | — | 这就是本地投影的写入点 |
+| agent shell | 默认 `workspace-write` → `no sandbox backend is usable`（镜像无 bwrap / Landlock / userns），bash 全部失败 | — | 必须在 profile 里覆盖权限模式 |
+| egress | 该镜像只放行 `api.deepseek.com`；npm / apt / GitHub 均不可达 | — | 无法在云上装包或钉版本 |
+| ingress | 桌面端口有 `https://6080-<id>.rayrunos.com` | — | 核心链路仍不需要 ingress |
+| 模型凭证 | 平台只把凭证注入 agent 进程；`exec` 环境里没有 key，`/credentials` 只回 `secret_mask` | — | 无法读回或转交凭证 |
+
+两条结论，取代原先“探针失败、命令待确认”的记录：
+
+1. **云端 worker 就是平台 agent 本身**。不需要另起 worker 进程、不需要 ingress、也不需要把本地密钥送到云上：agent 继承平台注入的模型凭证。
+2. **本地 profile 投影能改变云端能力**。在 `$DSH_HOME/profiles/headless/cordis.patch.yml` 覆盖 `sandbox-policy.mode: danger-full-access` 和 `approval.policy: never` 后，云端 shell 立刻可用（实测 `dsh --version`、`pwd`、`id -u` 均正常返回）。
+3. **插件上云不需要 tarball 或 npm 安装**。`resolveBundleDir` 用普通 Node 解析（`createRequire(profileDir).resolve.paths`），把插件文件放到 `<profile>/node_modules/<包名>/` 再把包名加进 profile 的 `bundles` 即可；egress 关闭的镜像照样能投影。
+
+### 尚未验证 / 已知风险
+
+- **版本漂移**：`0.2.0-rc.2` 与 `0.2.1-rc.5` 的 patch 方言差异没做全量比对；目前只用到两边都存在的 `id` 覆盖语法。版本本身可以用下面的白名单方式对齐（见下一节）。
+- **沙箱绕过 vs 修好**：`workspace-write` 在云上仍然不可用，只是被 profile 覆盖掉了；镜像补上 bubblewrap 才是根治（已实测可装，见下一节）。**决定（2026-11-01）：这台机器归用户使用，worker 暂保持 `danger-full-access`，不切回 `workspace-write`。**
+- **平台重建 profile**：如果 Rayrun 之后改成每次重建 `$DSH_HOME/profiles/headless`，投影会被冲掉，需要重新 sync；这一点不由本插件控制。
+- 首次 sync 会在机器上留一份 `<profile>.pre-projection` 备份；新机器上它是出厂模板，可原样回滚。
+
+### 访问白名单与版本对齐（2026-11-01 实测）
+
+| 事实 | 结论 |
+| --- | --- |
+| egress 只能在**创建时**设置 | `PATCH /sandboxes/{id}`、`PUT/PATCH /sandboxes/{id}/egress`、`POST .../network`、`PUT .../spec` 全部 404；要改白名单只能带 `egress.allow` 重建机器 |
+| npm 镜像 | 元数据走 `registry.npmmirror.com`，**tarball 在 `cdn.npmmirror.com`**，两个域名必须一起放行；`registry.npmjs.org` 的 tarball 实测 ~8 KB/s，不可用 |
+| 版本对齐 | `npm i -g @deepseek-ai/dsh@0.2.1-rc.5` 后云上 `dsh --version` == 本地的 `0.2.1-rc.5`；Node 云上 v24.22.0 / 本地 v24.21.0（同大版本） |
+| 沙箱后端 | `apt-get install -y bubblewrap` 得到 0.9.0，`bwrap --ro-bind / / ... true` 实测可运行；镜像缺的正是它，补上后 `workspace-write` 具备可用前提 |
+| 验收 | 云上 agent 实测回报 `0.2.1-rc.5`、`pwd=/workspace`、`id -u=0`、`bubblewrap 0.9.0`、profile 目录含投影文件，且 `rayrun*` 工具为 none |
+
+推荐的最小 egress 白名单（对齐本地能力所需）：
+
+```text
+api.deepseek.com        # 模型调用
+registry.npmmirror.com  # npm 元数据
+cdn.npmmirror.com       # npm tarball
+mirrors.aliyun.com      # apt 镜像（可选，取决于 sources.list）
+archive.ubuntu.com      # apt
+security.ubuntu.com     # apt 安全更新
 ```
-net: tap phase: ip tuntap 失败（fork/exec /usr/sbin/ip: operation not permitted）
-```
 
-因此云上镜像的实际 DSH 版本、agent entrypoint、`dsh` 参数尚未验证；方案中的命令以 Phase 0 输出为准。当前本地开发部署也未返回 ingress URL，但这不影响“本地权威 + prompt/SSE 委托”的核心链路。
+worker 目前仍用 `danger-full-access`：云上没有人可以回答「是否允许」的审批，`workspace-write` 一旦碰到 cwd 之外的写就会卡在审批上。要切回 `workspace-write` 需要先在平台侧提供审批通道或预授权策略。
 
-Phase 0 必须在可用集群上确认：
-
-```bash
-dsh --version
-node --version
-which dsh
-dsh --help
-ls -la ~/.dsh/profiles
-cat ~/.dsh/profiles/*/package.json
-# 确认 Rayrun prompt API 是否由 DSH 接管、事件格式是否可用
-```
+guest exec 兼容性：较新的 guest agent 会把 `$(...)` 命令替换吞掉并截断其后的所有命令（同一脚本里 `echo "x: $(id -u)"` 会打印空值且后续不执行）。插件里的 exec 命令已改为不依赖命令替换。
 
 ---
 
 ## 11. 验收清单
 
-- [ ] 云上/本地 DSH 版本、Node 主版本一致
-- [ ] 云上 profile 是本地投影：包、presets、skills、MCP、权限、模型路由一致
+- [x] 云上/本地 DSH 版本一致（实测 `cloud-yl0w` 出厂 `0.2.0-rc.2`；按白名单重建后 `dsh-workspace` 为 `0.2.1-rc.5` == 本地，Node v24 一致）
+- [x] 云上 profile 的 bundle 清单包含本插件，且插件文件与本地 `rev` 一致
+- [x] 云上本插件 `cloudMode: true`：无云电脑工具、无「云上/本地」切换上下文
+- [ ] 云上 profile 是本地投影：presets、skills、MCP、模型路由一致（当前只投影 worker 图层与本插件）
+- [x] worker 图层由本地投影推送，`rev` 可校验（`rayrun_dsh status` 比对远端 `sha256`）
+- [x] 投影通过 secret scan；不读取、不产出本地凭证
 - [ ] 云上 profile 只读；profileRev 漂移会被发现/拒绝
-- [ ] workspace push 后 HEAD + dirty patch hash 一致
-- [ ] 每次委托生成 Context Pack：handoff / conversation / patch / manifest / profileRev
-- [ ] Context Pack 通过 secret scan；无本地凭证、`.env`、SSH key
-- [ ] worker 首响应回显 sessionSeq / workspaceRev / profileRev，且与本地匹配
+- [x] workspace push 后 HEAD + dirty patch hash 一致（实测 `dsh-workspace`：`25460c4e` / `5407ec15…` 双端一致）
+- [x] 每次委托生成 Context Pack：handoff / conversation / patch / manifest / profileRev（写到 `.dsh/handoff/<taskId>/` 并上传云端）
+- [x] Context Pack 通过 secret scan；无本地凭证、`.env`、SSH key（作者文本扫描命中即拒绝；workspace.patch 与已推送工作区同源）
+- [x] worker 首响应回显 sessionSeq / workspaceRev / profileRev，且与本地匹配（实测 `task-mvxscyjy`：三值一致，`echoed: true`）
 - [ ] worker 丢失后可从本地 session log + workspace + 最近结果重建
-- [ ] 云上任务通过 prompt/SSE 委托，本地 session log 记录完整
-- [ ] 云上 diff 回传本地，本地 review/merge 后才成为权威
+- [x] 云上任务通过 prompt/SSE 委托，本地 session log 记录完整（委托结果是本地 tool result；pack/结果落在 `.dsh/`）
+- [x] 云上 diff 回传本地，本地 review/merge 后才成为权威（`pull` 只写 `.dsh/incoming`，不自动应用）
+- [x] 单 writer 锁：云上任务运行期间 `push` 被拒绝；云端偏离上次 push 时被 `workspace_drift` 拒绝；`force` 是唯一逃生口
 - [ ] 云上 profile `cloudMode: true`，无递归云电脑切换/创建
 - [ ] 本地模式完全本地；云上不可用明确失败，不静默降级
 - [ ] 无本地密钥进入云上；ingress（如启用）仅 token
-- [ ] 空闲自动 stop；destroy 前提示产物回传
+- [x] 空闲自动 stop（可选 `idle_stop_minutes`，默认关；只 stop 不 destroy；有未 pull 改动则跳过）；destroy 前提示产物回传仍未做
 
 ---
 
 ## 12. 仍需确认
 
-1. **委托传输**：首版用 Rayrun 的 agent prompt + SSE（推荐，无 ingress），还是 headless `dsh` exec，或 ACP/PTY？
-2. **交互粒度**：首版只做“整段任务委托”，还是需要多轮追问/流式交互？
-3. **云上 profile**：`cloudMode: true` 下云电脑面板是只读还是完全隐藏？
-4. **集群前提**：`ip tuntap` 何时修复；云上 agent 是否确认由 DSH 接管。
+已由 Phase 0 回答：
 
-确认后按 P0 → P4 实施；第一步是 profile 投影导出 + Phase 0 版本/传输探测。
+1. ~~**委托传输**~~ → 就是 Rayrun 的 agent prompt + SSE（`rayrun_agent`）：平台 agent 本身是 DSH（`dsh --profile headless`），事件流可用，不需要 ACP/PTY，也不需要 ingress。
+2. ~~**集群前提**~~ → 托管集群可用；`ip tuntap` 只出现在本地开发集群。云上 agent 已确认由 DSH 接管。
+
+仍待你决定：
+
+1. **交互粒度**：首版只做“整段任务委托”，还是需要多轮追问 / 流式交互？（现在 `rayrun_agent` 是整段任务 + 事件摘要。）
+2. **云上 profile 的边界**：`cloudMode` 在 headless 里没有客户端面板可隐藏，所以问题变成——云上 profile 要不要带本插件（`dsh-rayrun-computer`）？带了要禁掉哪些 host 能力才算不递归。
+3. **版本策略**：云上 `0.2.0-rc.2` 装不了包，短期只能“声明兼容区间 + 启动前比对版本”，还是推动镜像升级到与本地同版本？
+
+下一步按 P1 剩余项推进：本地插件 tarball 上云 + 版本比对；然后 P2 workspace push/pull；P3 再做 Context Pack 与版本三元组。

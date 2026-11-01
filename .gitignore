@@ -23,3 +23,6 @@ Thumbs.db
 # Build artifacts and packed plugin tarballs
 dist/
 *.tgz
+
+# Workspace sync artifacts (pulled cloud diffs, never committed)
+.dsh/

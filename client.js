@@ -42,7 +42,7 @@ window.__ModuleLoader__.load({
       }
     }
 
-    async function rpc(action, payload = {}) {
+    async function rpc(action, payload = {}, options = {}) {
       let res
       try {
         res = await fetch(RPC, {
@@ -50,6 +50,7 @@ window.__ModuleLoader__.load({
           credentials: 'same-origin',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action, ...payload }),
+          signal: options.signal,
         })
       } catch {
         throw new RpcError({ code: 'network', message: 'The local Rayrun route is unreachable.' })
@@ -92,6 +93,10 @@ window.__ModuleLoader__.load({
       if (error.code === 'token_required' || error.status === 401) return t.errUnauthorized
       if (error.code === 'invalid_base_url') return t.errBaseUrl
       if (error.code === 'invalid_name') return t.errName
+      if (error.code === 'create_unavailable') return t.errCreateUnavailable
+      if (error.code === 'update_unavailable') return t.updateUnavailable
+      if (error.code === 'update_locked') return t.updateLocked
+      if (error.code === 'up_to_date') return t.updateUpToDate
       if (error.code === 'not_found' || error.status === 404) return t.errNotFound
       if (error.name === 'TypeError') return t.errNetwork
       return error.message || t.errGeneric
@@ -306,6 +311,8 @@ window.__ModuleLoader__.load({
 .rr-dot{width:6px;height:6px;border-radius:50%;background:var(--dsw-alias-state-success-primary);flex:none}
 .rr-banner{display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:10px;border:.5px solid color-mix(in srgb,var(--dsw-alias-state-error-primary) 35%,transparent);background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 8%,transparent);color:var(--dsw-alias-state-error-primary);font-size:12px;line-height:18px;margin-bottom:16px}
 .rr-banner .rr-btn{margin-left:auto;height:28px;font-size:12px;color:var(--dsw-alias-label-primary)}
+.rr-update{border-color:color-mix(in srgb,var(--dsw-alias-brand-primary) 35%,transparent);background:color-mix(in srgb,var(--dsw-alias-brand-primary) 7%,transparent);color:var(--dsw-alias-label-primary)}
+.rr-update .rr-btn{height:28px;font-size:12px;flex:none}
 .rr-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
 .rr-card{position:relative;border:.5px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-1);border-radius:14px;display:flex;flex-direction:column;transition:border-color .15s,transform .15s,box-shadow .15s}
 .rr-card:hover{border-color:var(--dsw-alias-border-l2);transform:translateY(-1px);box-shadow:0 6px 20px rgba(2,6,23,.07)}
@@ -388,6 +395,12 @@ window.__ModuleLoader__.load({
 .rr-settings h2{font-size:16px;line-height:24px;font-weight:500;margin:0}
 .rr-settings>p{font-size:14px;line-height:22px;color:var(--dsw-alias-label-secondary);margin:0}
 .rr-panel{display:flex;flex-direction:column;gap:14px;padding:14px;border:.5px solid var(--dsw-alias-border-l1);border-radius:10px;background:var(--dsw-alias-bg-layer-1)}
+.rr-account-head{display:flex;align-items:center;gap:12px;min-width:0}
+.rr-avatar{width:40px;height:40px;border-radius:12px;object-fit:cover;flex:none;background:var(--dsw-alias-bg-layer-2);border:.5px solid var(--dsw-alias-border-l1)}
+.rr-avatar-fallback{display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:600;color:var(--dsw-alias-label-secondary)}
+.rr-account-info{display:flex;flex-direction:column;gap:5px;min-width:0;flex:1}
+.rr-account-line{display:flex;align-items:baseline;gap:8px;min-width:0}
+.rr-account-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-primary);font-size:13px;font-weight:550}
 .rr-inline-status{display:flex;align-items:center;gap:8px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary)}
 .rr-login-pane{display:flex;flex-direction:column;gap:10px}
 .rr-login-tabs{display:inline-flex;align-self:flex-start;gap:2px;padding:2px;border-radius:9px;background:var(--dsw-alias-bg-layer-2)}
@@ -441,7 +454,6 @@ window.__ModuleLoader__.load({
       loginFieldsRequired: '请填写用户名和密码。',
       loginAccountHint: '登录成功后自动创建 API Token；密码不会保存，Token 只进本机凭证库。',
       loginTokenHint: '已有 Token 可直接粘贴；Token 只保存在本机凭证库。',
-      loginAutoToken: '自动创建',
       loginLogout: '断开连接',
       loginLogoutConfirm: '断开当前 Rayrun 连接并清除本机凭证？已自动创建的 Token 会尝试吊销。',
       loginLoggedOut: '已断开并清除本机凭据。',
@@ -459,6 +471,18 @@ window.__ModuleLoader__.load({
       hours: '累计机时',
       running: '运行中',
       connectedTo: '已连接',
+      updateBody: '发现新版本 v{version}（当前 v{current}），更新后需要重启 DSH 生效。',
+      updateAction: '立即更新',
+      updateRunning: '正在更新…',
+      updateApplied: '已更新到 v{version}，刷新页面后生效。',
+      updateRestart: '已更新到 v{version}，请重启 DSH 生效。',
+      updateFailed: '更新没有完成：{error}',
+      updateRolledBack: '更新没有完成：{error}；已回滚到原版本。',
+      updateRemoved: '更新失败：{error}；插件已被卸载，请到「插件」页重新安装。',
+      updateUnknown: '更新已发起；如果页面没有反应，请重启 DSH 后确认版本。',
+      updateUnavailable: '当前 profile 没有可用的插件管理器，无法自动更新。',
+      updateLocked: '当前安装方式不支持自动更新，请到「插件」页重新安装新版本。',
+      updateUpToDate: '已经是最新版本。',
       loading: '正在读取云电脑…',
       errorTitle: '暂时连不上 Rayrun',
       retry: '重试',
@@ -521,8 +545,6 @@ window.__ModuleLoader__.load({
       creating: '正在创建云电脑…',
       cancel: '取消',
       settingsTitle: 'Rayrun 连接',
-      baseUrlLabel: 'API 地址',
-      baseUrlHint: '填写部署的 <origin>/v1，例如 https://api.rayrunos.com/v1。',
       tokenLabel: 'API Token',
       tokenKeep: '已配置，留空保持不变',
       tokenPlaceholder: '粘贴 Rayrun API Token',
@@ -531,12 +553,6 @@ window.__ModuleLoader__.load({
       test: '测试连接',
       testing: '测试中…',
       testOk: '连接成功：{agents} 个镜像，{machines} 台机器。',
-      source_saved: '页面设置',
-      source_config: '插件配置',
-      source_env: '环境变量',
-      source_default: '默认地址',
-      source_credentials: '凭证库',
-      source_file: '令牌文件',
       renameTitle: '重命名云电脑',
       renameLabel: '新名称',
       destroyTitle: '销毁云电脑',
@@ -544,17 +560,34 @@ window.__ModuleLoader__.load({
       destroyConfirm: '销毁',
       destroying: '正在销毁…',
       created: '云电脑已创建',
+      createdRetried: '第一次冷启动失败，已自动重试并创建成功。',
+      errCreateUnavailable: '平台冷启动超时，机器已被销毁且未计费。稍等一下再试通常就好。',
       destroyed: '云电脑已销毁',
       actionDone: '操作已提交',
       saved: '连接设置已保存',
+      modelKeyLabel: '模型 API Key（可选）',
+      modelKeyPlaceholder: 'sk-…',
+      modelKeyHint: '填了会在 Rayrun 上建一份 DeepSeek 模型凭证，只用来建凭证，不存本机。',
+      credentialLabel: '模型凭证',
+      credentialNew: '新建模型凭证…',
+      credentialNone: '不注入',
+      credentialLoading: '正在读取凭证…',
+      credentialHint: '选中的凭证会在创建机器时注入，供机器里的 agent 调模型。',
+      modelCredentialBadge: '模型凭证已就绪',
+      accountConnected: '已连接',
+      accountNotConnected: '未连接',
+      accountLabel: '账户',
+      accountUnknown: '账户信息不可用',
+      accountBalance: '余额 {amount}',
+      accountUsage: '累计 {hours} 机时',
+      accountSwitch: '更换账号',
+      accountBack: '返回账户',
       errUnauthorized: 'Rayrun 拒绝了这个 Token（401）。请在连接设置里用账号登录，或粘贴新的 API Token。',
       errNetwork: '连不上 Rayrun。请检查 API 地址和网络。',
       errName: '名称需要 1–64 个字符。',
       errBaseUrl: 'API 地址必须是完整的 http(s) URL。',
       errNotFound: '找不到这台云电脑。',
       errGeneric: '操作没有完成。',
-      tokenStatus: 'Token 来源：{source}',
-      notConfigured: '未配置 Token',
       selectImage: '选择镜像',
       passwordRequiresRunning: '请先开机再读取桌面密码。',
     }
@@ -591,7 +624,6 @@ window.__ModuleLoader__.load({
       loginFieldsRequired: 'Enter your username and password.',
       loginAccountHint: 'A token is created automatically after sign-in; your password is never stored.',
       loginTokenHint: 'Paste an existing token; it is stored only in the local credential store.',
-      loginAutoToken: 'Auto-created',
       loginLogout: 'Disconnect',
       loginLogoutConfirm: 'Disconnect Rayrun and clear the local credential? The auto-created token will be revoked if possible.',
       loginLoggedOut: 'Disconnected and cleared local credentials.',
@@ -609,6 +641,18 @@ window.__ModuleLoader__.load({
       hours: 'Total hours',
       running: 'Running',
       connectedTo: 'Connected to',
+      updateBody: 'Version {version} is available (this build is {current}); an update needs a DSH restart.',
+      updateAction: 'Update now',
+      updateRunning: 'Updating…',
+      updateApplied: 'Updated to v{version}; refresh the page to pick it up.',
+      updateRestart: 'Updated to v{version}; restart DSH to apply it.',
+      updateFailed: 'The update did not finish: {error}',
+      updateRolledBack: 'The update did not finish: {error}; the previous version was restored.',
+      updateRemoved: 'The update failed: {error}; the plugin was uninstalled, so reinstall it from the Plugins page.',
+      updateUnknown: 'The update started; if the page stops responding, restart DSH and check the version.',
+      updateUnavailable: 'This profile has no plugin manager, so the update cannot be applied automatically.',
+      updateLocked: 'This install cannot update itself; reinstall the new version from the Plugins page.',
+      updateUpToDate: 'This build is already up to date.',
       loading: 'Loading cloud computers…',
       errorTitle: 'Cannot reach Rayrun',
       retry: 'Retry',
@@ -671,8 +715,6 @@ window.__ModuleLoader__.load({
       creating: 'Creating the cloud computer…',
       cancel: 'Cancel',
       settingsTitle: 'Rayrun connection',
-      baseUrlLabel: 'API address',
-      baseUrlHint: 'Use <origin>/v1 for your deployment, for example https://api.rayrunos.com/v1.',
       tokenLabel: 'API token',
       tokenKeep: 'Configured; leave blank to keep it',
       tokenPlaceholder: 'Paste a Rayrun API token',
@@ -681,12 +723,6 @@ window.__ModuleLoader__.load({
       test: 'Test connection',
       testing: 'Testing…',
       testOk: 'Connected: {agents} images, {machines} machines.',
-      source_saved: 'Page setting',
-      source_config: 'Plugin config',
-      source_env: 'Environment',
-      source_default: 'Default',
-      source_credentials: 'Credential store',
-      source_file: 'Token file',
       renameTitle: 'Rename cloud computer',
       renameLabel: 'New name',
       destroyTitle: 'Destroy cloud computer',
@@ -694,17 +730,34 @@ window.__ModuleLoader__.load({
       destroyConfirm: 'Destroy',
       destroying: 'Destroying…',
       created: 'Cloud computer created',
+      createdRetried: 'The first cold start failed; the retry succeeded.',
+      errCreateUnavailable: 'The platform timed out starting the machine. It was destroyed without charge; retry in a moment.',
       destroyed: 'Cloud computer destroyed',
       actionDone: 'Action submitted',
       saved: 'Connection settings saved',
+      modelKeyLabel: 'Model API key (optional)',
+      modelKeyPlaceholder: 'sk-…',
+      modelKeyHint: 'Creates a DeepSeek model credential on Rayrun; used once and never stored locally.',
+      credentialLabel: 'Model credential',
+      credentialNew: 'New model credential…',
+      credentialNone: 'Do not inject',
+      credentialLoading: 'Reading credentials…',
+      credentialHint: 'The selected credential is injected when the machine is created so its agent can call a model.',
+      modelCredentialBadge: 'Model credential ready',
+      accountConnected: 'Connected',
+      accountNotConnected: 'Not connected',
+      accountLabel: 'Account',
+      accountUnknown: 'Account details unavailable',
+      accountBalance: 'Balance {amount}',
+      accountUsage: '{hours} machine-hours',
+      accountSwitch: 'Switch account',
+      accountBack: 'Back to account',
       errUnauthorized: 'Rayrun rejected this token (401). Sign in with your account in connection settings, or paste a new API token.',
       errNetwork: 'Cannot reach Rayrun. Check the API address and your network.',
       errName: 'The name must be 1–64 characters.',
       errBaseUrl: 'The API address must be a full http(s) URL.',
       errNotFound: 'This cloud computer was not found.',
       errGeneric: 'The operation did not complete.',
-      tokenStatus: 'Token source: {source}',
-      notConfigured: 'No token configured',
       selectImage: 'Choose an image',
       passwordRequiresRunning: 'Start the machine before reading its desktop password.',
     }
@@ -777,7 +830,8 @@ window.__ModuleLoader__.load({
     }
 
     function ConnectionForm({ t, connection, onSaved }) {
-      const [baseUrl, setBaseUrl] = useState(connection?.baseUrl ?? '')
+      const connected = Boolean(connection?.configured)
+      const baseUrl = connection?.baseUrl ?? ''
       const [tab, setTab] = useState('account')
       const [username, setUsername] = useState('')
       const [password, setPassword] = useState('')
@@ -785,6 +839,26 @@ window.__ModuleLoader__.load({
       const [busy, setBusy] = useState('')
       const [error, setError] = useState('')
       const [note, setNote] = useState('')
+      const [account, setAccount] = useState(null)
+      const [accountLoading, setAccountLoading] = useState(false)
+      const [avatarFailed, setAvatarFailed] = useState(false)
+      const [showLogin, setShowLogin] = useState(false)
+
+      useEffect(() => {
+        setAvatarFailed(false)
+      }, [account?.avatarUrl])
+
+      const loadAccount = async () => {
+        setAccountLoading(true)
+        try {
+          const data = await rpc('account')
+          setAccount(data.account)
+        } catch {
+          setAccount(null)
+        } finally {
+          setAccountLoading(false)
+        }
+      }
       const [methods, setMethods] = useState(null)
       const [methodsError, setMethodsError] = useState('')
       const [wechat, setWechat] = useState(null)
@@ -803,8 +877,12 @@ window.__ModuleLoader__.load({
       )
 
       useEffect(() => {
-        setBaseUrl(connection?.baseUrl ?? '')
-      }, [connection?.baseUrl])
+        if (!connected) {
+          setAccount(null)
+          return
+        }
+        void loadAccount()
+      }, [connected])
 
       useEffect(() => {
         let cancelled = false
@@ -871,10 +949,15 @@ window.__ModuleLoader__.load({
         setError('')
         setNote('')
         try {
-          const data = await rpc('login.password', { baseUrl, username: username.trim(), password })
+          const data = await rpc('login.password', {
+            username: username.trim(),
+            password,
+          })
           setPassword('')
           setNote(t.loginPasswordOk)
           onSaved?.(data.connection)
+          setShowLogin(false)
+          void loadAccount()
         } catch (cause) {
           setError(errorText(cause, t))
         } finally {
@@ -914,10 +997,12 @@ window.__ModuleLoader__.load({
         setError('')
         setNote('')
         try {
-          const data = await rpc('connection.save', { baseUrl, token })
+          const data = await rpc('connection.save', { token })
           setToken('')
           setNote(t.saved)
           onSaved?.(data.connection)
+          setShowLogin(false)
+          void loadAccount()
         } catch (cause) {
           setError(errorText(cause, t))
         } finally {
@@ -930,7 +1015,7 @@ window.__ModuleLoader__.load({
         setError('')
         setNote('')
         try {
-          const data = await rpc('connection.test', { baseUrl, token })
+          const data = await rpc('connection.test', { token })
           setNote(tf(t, 'testOk', { agents: data.result.agents, machines: data.result.machines }))
         } catch (cause) {
           setError(errorText(cause, t))
@@ -947,6 +1032,7 @@ window.__ModuleLoader__.load({
         try {
           const data = await rpc('login.logout')
           setNote(t.loginLoggedOut)
+          setShowLogin(false)
           onSaved?.(data.connection)
         } catch (cause) {
           setError(errorText(cause, t))
@@ -955,9 +1041,24 @@ window.__ModuleLoader__.load({
         }
       }
 
-      const source = connection?.tokenSource
-        ? tf(t, 'tokenStatus', { source: t[`source_${connection.tokenSource}`] ?? connection.tokenSource })
-        : t.notConfigured
+      const accountLabel = account?.displayName || account?.username
+      const accountName = accountLabel
+        ? account.role
+          ? `${accountLabel} · ${account.role}`
+          : accountLabel
+        : null
+      const accountInitial = (accountLabel || '?').trim().slice(0, 1).toUpperCase() || '?'
+      const showAvatar = Boolean(account?.avatarUrl && !avatarFailed)
+      const balanceText =
+        account?.balance && typeof account.balance.balance_cents === 'number'
+          ? tf(t, 'accountBalance', {
+              amount: `${account.balance.currency === 'CNY' ? '¥' : ''}${(account.balance.balance_cents / 100).toFixed(2)}`,
+            })
+          : null
+      const usageText =
+        account?.usage && typeof account.usage.vm_hours === 'number'
+          ? tf(t, 'accountUsage', { hours: account.usage.vm_hours.toFixed(1) })
+          : null
 
       const tabButton = (id, label) =>
         h(
@@ -1083,6 +1184,8 @@ window.__ModuleLoader__.load({
         ),
       )
 
+      const showAccount = connected && !showLogin
+
       return h(
         'div',
         { className: 'rr-modal-body' },
@@ -1092,45 +1195,84 @@ window.__ModuleLoader__.load({
           h('span', {
             className: 'rr-dot',
             style: {
-              background: connection?.configured
+              background: connected
                 ? 'var(--dsw-alias-state-success-primary)'
                 : 'var(--dsw-alias-state-idle-primary)',
             },
           }),
-          h('span', null, source),
-          h('span', { className: 'rr-badge' }, t[`source_${connection?.baseUrlSource}`] ?? connection?.baseUrlSource ?? ''),
-          connection?.autoToken ? h('span', { className: 'rr-badge' }, t.loginAutoToken) : null,
+          h('span', null, connected ? t.accountConnected : t.accountNotConnected),
+          connection?.modelCredential ? h('span', { className: 'rr-badge' }, t.modelCredentialBadge) : null,
         ),
-        h(
-          'label',
-          { className: 'rr-field' },
-          h('span', { className: 'rr-label' }, t.baseUrlLabel),
-          h('input', {
-            className: 'rr-input',
-            value: baseUrl,
-            placeholder: 'https://api.rayrunos.com/v1',
-            spellCheck: false,
-            autoComplete: 'off',
-            onChange: (event) => setBaseUrl(event.target.value),
-          }),
-          h('span', { className: 'rr-hint' }, t.baseUrlHint),
-        ),
-        h(
-          'div',
-          { className: 'rr-login-tabs', role: 'tablist', 'aria-label': t.settingsTitle },
-          tabButton('account', t.loginTabAccount),
-          tabButton('token', t.loginTabToken),
-        ),
-        tab === 'account' ? accountPane : tokenPane,
-        error ? h('p', { className: 'rr-error' }, I.alert(15), error) : null,
-        note ? h('p', { className: 'rr-ok' }, I.check(15), note) : null,
-        connection?.configured && (connection.tokenSource === 'credentials' || connection.autoToken)
+        showAccount
           ? h(
               'div',
-              { className: 'rr-login-foot' },
-              h('button', { type: 'button', className: 'rr-btn', disabled: Boolean(busy), onClick: () => void logout() }, t.loginLogout),
+              { className: 'rr-panel' },
+              h(
+                'div',
+                { className: 'rr-account-head' },
+                showAvatar
+                  ? h('img', {
+                      className: 'rr-avatar',
+                      src: account.avatarUrl,
+                      alt: '',
+                      referrerPolicy: 'no-referrer',
+                      onError: () => setAvatarFailed(true),
+                    })
+                  : h('span', { className: 'rr-avatar rr-avatar-fallback', 'aria-hidden': 'true' }, accountInitial),
+                h(
+                  'div',
+                  { className: 'rr-account-info' },
+                  h(
+                    'div',
+                    { className: 'rr-account-line' },
+                    h('span', { className: 'rr-label' }, t.accountLabel),
+                    h(
+                      'span',
+                      { className: 'rr-account-name', title: account?.displayName && account?.username ? `@${account.username}` : undefined },
+                      accountName ?? (accountLoading ? '…' : t.accountUnknown),
+                    ),
+                  ),
+                  balanceText || usageText
+                    ? h(
+                        'div',
+                        { className: 'rr-meta' },
+                        balanceText ? h('span', null, balanceText) : null,
+                        usageText ? h('span', null, usageText) : null,
+                      )
+                    : null,
+                ),
+              ),
+              h(
+                'div',
+                { className: 'rr-row' },
+                h(
+                  'button',
+                  { type: 'button', className: 'rr-btn', disabled: Boolean(busy), onClick: () => void logout() },
+                  busy === 'logout' ? t.loginBusy : t.loginLogout,
+                ),
+                h('button', { type: 'button', className: 'rr-btn', onClick: () => setShowLogin(true) }, t.accountSwitch),
+              ),
             )
-          : null,
+          : h(
+              React.Fragment,
+              null,
+              h(
+                'div',
+                { className: 'rr-login-tabs', role: 'tablist', 'aria-label': t.settingsTitle },
+                tabButton('account', t.loginTabAccount),
+                tabButton('token', t.loginTabToken),
+              ),
+              tab === 'account' ? accountPane : tokenPane,
+              connected
+                ? h(
+                    'div',
+                    { className: 'rr-row', style: { justifyContent: 'flex-end' } },
+                    h('button', { type: 'button', className: 'rr-btn', onClick: () => setShowLogin(false) }, t.accountBack),
+                  )
+                : null,
+            ),
+        error ? h('p', { className: 'rr-error' }, I.alert(15), error) : null,
+        note ? h('p', { className: 'rr-ok' }, I.check(15), note) : null,
       )
     }
 
@@ -1256,7 +1398,7 @@ window.__ModuleLoader__.load({
     /* Create / rename / destroy / password dialogs                       */
     /* ------------------------------------------------------------------ */
 
-    function CreateDialog({ t, agents, defaults, onClose, onCreate }) {
+    function CreateDialog({ t, agents, defaults, defaultCredential, onClose, onCreate }) {
       const desktopAgents = useMemo(() => (agents || []).filter((item) => item.supports_desktop), [agents])
       const [name, setName] = useState(() => `cloud-${Math.random().toString(36).slice(2, 6)}`)
       const [agent, setAgent] = useState(() => {
@@ -1265,8 +1407,33 @@ window.__ModuleLoader__.load({
       })
       const [cpu, setCpu] = useState(Number(defaults?.cpu_cores) || 2)
       const [memory, setMemory] = useState(2048)
+      const [credential, setCredential] = useState(defaultCredential || '__none__')
+      const [credentialList, setCredentialList] = useState(null)
+      const [modelKey, setModelKey] = useState('')
       const [busy, setBusy] = useState(false)
       const [error, setError] = useState('')
+
+      useEffect(() => {
+        let cancelled = false
+        void (async () => {
+          try {
+            const data = await rpc('credentials.list')
+            if (cancelled) return
+            const list = data.credentials || []
+            setCredentialList(list)
+            setCredential((current) => {
+              if (current !== '__none__' && current !== '__new__' && list.some((item) => item.name === current)) return current
+              if (defaultCredential && list.some((item) => item.name === defaultCredential)) return defaultCredential
+              return list.length ? list[0].name : '__new__'
+            })
+          } catch {
+            if (!cancelled) setCredentialList([])
+          }
+        })()
+        return () => {
+          cancelled = true
+        }
+      }, [defaultCredential])
 
       const submit = async () => {
         const trimmed = name.trim()
@@ -1280,8 +1447,15 @@ window.__ModuleLoader__.load({
         }
         setBusy(true)
         setError('')
+        const form = { name: trimmed, agent, cpu_cores: cpu, memory_mb: Math.max(2048, memory), remote_desktop: true }
+        if (credential === '__new__') {
+          form.credentials = []
+          if (modelKey.trim()) form.modelKey = modelKey.trim()
+        } else {
+          form.credentials = credential === '__none__' ? [] : [credential]
+        }
         try {
-          await onCreate({ name: trimmed, agent, cpu_cores: cpu, memory_mb: Math.max(2048, memory), remote_desktop: true })
+          await onCreate(form)
         } catch (cause) {
           setError(errorText(cause, t))
           setBusy(false)
@@ -1368,6 +1542,43 @@ window.__ModuleLoader__.load({
               ),
             ),
           ),
+          h(
+            'label',
+            { className: 'rr-field' },
+            h('span', { className: 'rr-label' }, t.credentialLabel),
+            h(
+              'select',
+              {
+                className: 'rr-select',
+                value: credential,
+                onChange: (event) => setCredential(event.target.value),
+              },
+              credentialList === null ? h('option', { value: credential }, t.credentialLoading) : null,
+              (credentialList || []).map((item) =>
+                h('option', { key: item.name, value: item.name }, item.slot ? `${item.name} · ${item.slot}` : item.name),
+              ),
+              h('option', { value: '__new__' }, t.credentialNew),
+              h('option', { value: '__none__' }, t.credentialNone),
+            ),
+            h('span', { className: 'rr-hint' }, t.credentialHint),
+          ),
+          credential === '__new__'
+            ? h(
+                'label',
+                { className: 'rr-field' },
+                h('span', { className: 'rr-label' }, t.modelKeyLabel),
+                h('input', {
+                  className: 'rr-input',
+                  type: 'password',
+                  value: modelKey,
+                  placeholder: t.modelKeyPlaceholder,
+                  spellCheck: false,
+                  autoComplete: 'off',
+                  onChange: (event) => setModelKey(event.target.value),
+                }),
+                h('span', { className: 'rr-hint' }, t.modelKeyHint),
+              )
+            : null,
           error ? h('p', { className: 'rr-error' }, I.alert(15), error) : null,
           h(
             'div',
@@ -1659,6 +1870,8 @@ window.__ModuleLoader__.load({
       const [notice, setNotice] = useState('')
       const [busyId, setBusyId] = useState('')
       const [menuFor, setMenuFor] = useState('')
+      const [updateInfo, setUpdateInfo] = useState(null)
+      const [updating, setUpdating] = useState(false)
 
       const updateMachine = useCallback((machine) => {
         setData((prev) => {
@@ -1687,6 +1900,18 @@ window.__ModuleLoader__.load({
       useEffect(() => {
         void load()
       }, [load])
+
+      useEffect(() => {
+        let cancelled = false
+        void rpc('update.check')
+          .then((next) => {
+            if (!cancelled) setUpdateInfo(next.update)
+          })
+          .catch(() => {})
+        return () => {
+          cancelled = true
+        }
+      }, [])
 
       useEffect(() => {
         if (!notice) return undefined
@@ -1798,7 +2023,7 @@ window.__ModuleLoader__.load({
         await prepareDesktop(result.machine)
         setData((prev) => (prev ? { ...prev, machines: [result.machine, ...prev.machines] } : prev))
         setModal(null)
-        setNotice(t.created)
+        setNotice(result.machine.retried ? t.createdRetried : t.created)
         setView({ kind: 'desktop', id: result.machine.id })
         void load(true)
       }
@@ -1923,6 +2148,41 @@ window.__ModuleLoader__.load({
         )
       }
 
+      const applyUpdate = async () => {
+        if (updating) return
+        setUpdating(true)
+        const controller = new AbortController()
+        const timer = setTimeout(() => controller.abort(), 120000)
+        try {
+          const next = await rpc('update.apply', {}, { signal: controller.signal })
+          const result = next.result
+          if (result?.ok) {
+            const restart = result.application === 'restart-required' || Boolean(result.restartReason)
+            setNotice(
+              restart
+                ? tf(t, 'updateRestart', { version: result.version })
+                : tf(t, 'updateApplied', { version: result.version }),
+            )
+            setUpdateInfo((prev) => (prev ? { ...prev, available: false, canApply: false } : prev))
+            return
+          }
+          setNotice(
+            result?.rolledBack
+              ? tf(t, 'updateRolledBack', { error: result?.message ?? '' })
+              : result?.code === 'install_failed'
+                ? tf(t, 'updateRemoved', { error: result?.message ?? '' })
+                : tf(t, 'updateFailed', { error: result?.message ?? '' }),
+          )
+        } catch {
+          // Removing this bundle takes its own RPC route away before the reply
+          // is written, so a lost response is expected rather than an error.
+          setNotice(t.updateUnknown)
+        } finally {
+          clearTimeout(timer)
+          setUpdating(false)
+        }
+      }
+
       const renderList = () => {
         if (loading && !data) {
           return h(
@@ -2016,6 +2276,21 @@ window.__ModuleLoader__.load({
 
       const machine = view.kind === 'desktop' ? machines.find((item) => item.id === view.id) : undefined
 
+      const updateBanner =
+        updateInfo?.available && updateInfo?.canApply
+          ? h(
+              'div',
+              { className: 'rr-banner rr-update' },
+              I.refresh(16),
+              h('span', null, tf(t, 'updateBody', { version: updateInfo.latest, current: updateInfo.current })),
+              h(
+                'button',
+                { type: 'button', className: 'rr-btn rr-btn-primary', disabled: updating, onClick: () => void applyUpdate() },
+                updating ? t.updateRunning : t.updateAction,
+              ),
+            )
+          : null
+
       return h(
         React.Fragment,
         null,
@@ -2058,13 +2333,14 @@ window.__ModuleLoader__.load({
                   ),
                 ),
               ),
-              h('div', { className: 'rr-scroll' }, h('div', { className: 'rr-container' }, renderList())),
+              h('div', { className: 'rr-scroll' }, h('div', { className: 'rr-container' }, updateBanner, renderList())),
             ),
         modal?.kind === 'create'
           ? h(CreateDialog, {
               t,
               agents: data?.agents ?? [],
               defaults: data?.defaults,
+              defaultCredential: connection?.modelCredential,
               onClose: () => setModal(null),
               onCreate: createMachine,
             })
@@ -2137,7 +2413,7 @@ window.__ModuleLoader__.load({
           'section',
           { className: 'rr-settings' },
           h('h2', null, t.settingsTitle),
-          h('p', null, t.setupBody),
+          connection?.configured ? null : h('p', null, t.setupBody),
           error ? h('p', { className: 'rr-error' }, I.alert(15), error) : null,
           connection
             ? h('div', { className: 'rr-panel' }, h(ConnectionForm, { t, connection, onSaved: (next) => setConnection(next) }))

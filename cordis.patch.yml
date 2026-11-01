@@ -10,7 +10,7 @@
       config:
         baseUrl: 'https://api.rayrunos.com/v1'
         sandboxName: 'dsh-workspace'
-        agent: 'ubuntu@1'
+        agent: 'deepseek-harness@1'
         cpu_cores: 2
         memory_mb: 2048
         autoCreate: true

@@ -9,7 +9,7 @@
  */
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -22,6 +22,13 @@ import {
   wechatToken,
 } from './lib/auth.js'
 import { LocalError, RayrunError, TOKEN_REF, createRayrun, normalizeBaseUrl } from './lib/rayrun.js'
+import { applyUpdate, canAutoUpdate, fetchLatestVersion, isNewer } from './lib/update.js'
+import { fileURLToPath } from 'node:url'
+import { exportProfileProjection, readCloudWorker, readPluginFiles, syncCloudWorker } from './lib/cloud-dsh.js'
+import { pullWorkspace, pushWorkspace, cloudWorkspaceRoot, readCloudState } from './lib/cloud-workspace.js'
+import { delegateTask } from './lib/delegate.js'
+import { isFinished, kindOf, readFrame, sseFrames } from './lib/sse.js'
+import { WorkspaceLocks } from './lib/workspace-lock.js'
 
 export const name = 'rayrun-cloud'
 export const inject = ['tools']
@@ -29,6 +36,81 @@ export const inject = ['tools']
 const ROUTE = '/plugins/rayrun'
 const MAX_TEXT = 12000
 const MAX_BODY = 1024 * 1024
+
+const PACKAGE_ID = 'dsh-rayrun-computer'
+/** This package's own directory: the source of the files a cloud worker receives. */
+const PACKAGE_DIR = fileURLToPath(new URL('./', import.meta.url))
+const UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1000
+const UPDATE_REFRESH_MS = 5 * 60 * 1000
+const UPDATE_TIMEOUT_MS = 10_000
+
+/**
+ * What a cloud worker tells its own model. The worker profile ships this plugin
+ * for parity, but it holds no Rayrun credentials and has no route to the API, so
+ * the cloud-computer controls stay off and the agent says what host it is on.
+ */
+const CLOUD_WORKER_CONTEXT = [
+  '[Rayrun 云上 worker]',
+  '本机是 Rayrun 云电脑上的 DSH worker：shell 与文件工具直接在本机执行。',
+  '云电脑管理工具（创建/销毁/切换机器）在此不可用；需要新机器请在本地会话里操作。',
+].join('\n')
+
+/** This build's version, read once: the bundle cannot be newer than its manifest. */
+const ownVersion = (() => {
+  try {
+    return JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version
+  } catch {
+    return '0.0.0'
+  }
+})()
+
+/** The last registry answer, shared by every turn and by the open page. */
+let updateCheck = { latest: null, checkedAt: 0, error: '' }
+let updateCheckRunning = null
+
+/** Ask the registry, unless the last answer is still fresh or a check is running. */
+function checkForUpdate() {
+  if (updateCheckRunning) return updateCheckRunning
+  if (updateCheck.checkedAt && Date.now() - updateCheck.checkedAt < UPDATE_REFRESH_MS) {
+    return Promise.resolve(updateCheck)
+  }
+  updateCheckRunning = (async () => {
+    try {
+      const latest = await fetchLatestVersion(PACKAGE_ID, { timeoutMs: UPDATE_TIMEOUT_MS })
+      updateCheck = { latest, checkedAt: Date.now(), error: '' }
+    } catch (error) {
+      updateCheck = { ...updateCheck, checkedAt: Date.now(), error: String(error?.message ?? error) }
+    } finally {
+      updateCheckRunning = null
+    }
+    return updateCheck
+  })()
+  return updateCheckRunning
+}
+
+/** What the page needs to decide whether to offer an update. */
+async function updateView(ctx) {
+  const manager = typeof ctx.get === 'function' ? ctx.get('pluginManager') : undefined
+  let source = ''
+  if (manager) {
+    try {
+      const bundle = (await manager.listBundles()).find((item) => item.name === PACKAGE_ID)
+      source = typeof bundle?.source === 'string' ? bundle.source : ''
+    } catch {
+      source = ''
+    }
+  }
+  const available = isNewer(updateCheck.latest, ownVersion)
+  return {
+    current: ownVersion,
+    latest: updateCheck.latest,
+    checkedAt: updateCheck.checkedAt,
+    error: updateCheck.error,
+    source,
+    available,
+    canApply: available && Boolean(manager) && canAutoUpdate(source, PACKAGE_ID),
+  }
+}
 
 /** In-flight sandbox resolutions, keyed by base URL + sandbox name. */
 const inflight = new Map()
@@ -45,6 +127,11 @@ function clamp(text, limit = MAX_TEXT) {
   if (value.length <= limit) return value
   const half = Math.floor(limit / 2)
   return `${value.slice(0, half)}\n… ${value.length - limit} characters omitted …\n${value.slice(-half)}`
+}
+
+/** First 8 hex characters of a projection revision, for one-line summaries. */
+function shortRev(value) {
+  return typeof value === 'string' && value ? value.slice(0, 8) : 'none'
 }
 
 /**
@@ -68,77 +155,6 @@ function summarize(machine) {
   const usage = machine.usage?.vm_hours ? ` · ${machine.usage.vm_hours.toFixed(2)} vm-h` : ''
   const desktop = machine.remote_desktop ? ' · desktop' : ''
   return `${name}(${machine.id}) ${machine.status}${desktop}${usage}`
-}
-
-/** Read an SSE response body into parsed JSON data frames. */
-async function* sseFrames(res, signal) {
-  if (!res.body) return
-  const decoder = new TextDecoder()
-  let buffer = ''
-  for await (const chunk of res.body) {
-    if (signal?.aborted) return
-    buffer += decoder.decode(chunk, { stream: true })
-    let boundary = buffer.indexOf('\n\n')
-    while (boundary !== -1) {
-      const block = buffer.slice(0, boundary)
-      buffer = buffer.slice(boundary + 2)
-      const data = block
-        .split('\n')
-        .filter((line) => line.startsWith('data:'))
-        .map((line) => line.slice(5).trim())
-        .join('')
-      if (data) {
-        try {
-          yield JSON.parse(data)
-        } catch {
-          yield { raw: data }
-        }
-      }
-      boundary = buffer.indexOf('\n\n')
-    }
-  }
-}
-
-/** The event kind of a journal frame, whichever field carries it. */
-function kindOf(event) {
-  return String(event?.kind ?? event?.type ?? event?.event ?? '')
-}
-
-/** Whether a frame finishes the prompt the tool is waiting on. */
-function isFinished(kind) {
-  return /(^|\.)(exited|done|completed|failed|cancelled)$/.test(kind) || kind === 'agent.exit'
-}
-
-/** Parse an `agent.raw` line: the sandbox agent's own stream-json output. */
-function parseLine(line) {
-  if (typeof line !== 'string' || line[0] !== '{') return undefined
-  try {
-    return JSON.parse(line)
-  } catch {
-    return undefined
-  }
-}
-
-/**
- * Classify one agent frame. `agent.message` carries the clean per-turn text; the
- * raw stream-json line carries the final result and the assistant narration.
- */
-function readFrame(event, kind) {
-  const payload = event?.payload
-  if (kind === 'agent.message') {
-    return typeof payload?.text === 'string' && payload.text ? { message: payload.text } : {}
-  }
-  const parsed = parseLine(payload?.line)
-  if (!parsed) return {}
-  if (parsed.type === 'result') return typeof parsed.result === 'string' ? { final: parsed.result } : {}
-  if (parsed.type === 'assistant' && Array.isArray(parsed.message?.content)) {
-    const text = parsed.message.content
-      .filter((block) => block?.type === 'text' && typeof block.text === 'string')
-      .map((block) => block.text)
-      .join('')
-    return text ? { narration: text } : {}
-  }
-  return {}
 }
 
 /** Read a small JSON request body, refusing oversized payloads. */
@@ -216,12 +232,92 @@ export function apply(ctx, config) {
 
   const settings = ray.settings
 
+  // A cloud worker profile ships this plugin for parity, but it has no Rayrun
+  // credentials and no route to the API. Keep the controls off (so the cloud
+  // agent cannot recurse into machine management) and say what host this is.
+  if (settings.cloudMode) {
+    ctx.inject(['systemPrompt'], (promptCtx) => {
+      promptCtx.effect(
+        () =>
+          promptCtx.systemPrompt.context({
+            name: 'rayrun-cloud-worker',
+            order: 900,
+            text: () => CLOUD_WORKER_CONTEXT,
+          }),
+        'rayrun: cloud worker context',
+      )
+    })
+    return
+  }
+
+  // Check once on load and then twice a day; the page only reads the last
+  // answer, so a slow registry never blocks a request.
+  ctx.effect(() => {
+    void checkForUpdate()
+    const timer = setInterval(() => void checkForUpdate(), UPDATE_INTERVAL_MS)
+    if (typeof timer.unref === 'function') timer.unref()
+    return () => clearInterval(timer)
+  }, 'rayrun: update check')
+
   /**
    * Per-session execution target chosen by the composer toggle. It is a runtime
    * fact, not durable session state: the client restores its own copy after a
    * reload and pushes it back through the RPC route.
    */
   const taskTargets = new Map()
+
+  /**
+   * Single-writer guard for a machine's workspace. A cloud task (agent or exec)
+   * holds it; `rayrun_workspace push` refuses to replace a busy tree. In-memory:
+   * a Host restart forgets it, like the task targets above.
+   */
+  const workspaceLocks = new WorkspaceLocks()
+
+  const lockReason = (label, text) => `${label}: ${String(text ?? '').replace(/\s+/g, ' ').slice(0, 60)}`
+
+  /**
+   * Idle stop is opt-in (`idle_stop_minutes`). It only ever stops a machine, and
+   * skips the stop when the cloud workspace holds changes that were never pulled:
+   * stopping there would hide work the user has not reviewed yet.
+   */
+  const idleStops = new Map()
+
+  const cancelIdleStop = (machineId) => {
+    const timer = idleStops.get(machineId)
+    if (timer) {
+      clearTimeout(timer)
+      idleStops.delete(machineId)
+    }
+  }
+
+  const stopWhenIdle = async (machine) => {
+    if (workspaceLocks.status(machine.id)) return 'busy'
+    try {
+      const root = await cloudWorkspaceRoot(ray, machine.id)
+      const cloud = await readCloudState(ray, machine.id, root)
+      const state = cloud.state
+      const drifted = state
+        ? cloud.head !== state.head || cloud.digest !== state.digest
+        : cloud.statusLines > 0
+      if (drifted) return 'unpulled-changes'
+      await ray.machineAction(machine.id, 'stop')
+      return 'stopped'
+    } catch {
+      return 'skipped'
+    }
+  }
+
+  const scheduleIdleStop = (machine) => {
+    if (!settings.idleStopMinutes) return null
+    cancelIdleStop(machine.id)
+    const timer = setTimeout(() => {
+      idleStops.delete(machine.id)
+      void stopWhenIdle(machine)
+    }, settings.idleStopMinutes * 60_000)
+    if (typeof timer.unref === 'function') timer.unref()
+    idleStops.set(machine.id, timer)
+    return settings.idleStopMinutes
+  }
 
   const targetOf = (sessionId) => (taskTargets.get(String(sessionId ?? '')) === 'cloud' ? 'cloud' : 'local')
 
@@ -232,6 +328,9 @@ export function apply(ctx, config) {
         '[Rayrun 工作任务目标]',
         '当前任务运行在「云上电脑」：Rayrun 云电脑。',
         `- 默认机器名：${settings.sandboxName}；不存在时用 rayrun_sandbox 创建（需要桌面时 remote_desktop=true，内存至少 2048 MB）。`,
+        '- 整段任务优先用 `rayrun_dsh delegate` 委托给云上 DSH worker：它会先镜像 workspace、校验 profile 投影、交付 Context Pack（handoff.md / manifest.json / workspace.patch / profile.json）并回显版本三元组，结果取回本地 `.dsh/results/<taskId>/`。',
+        '- 委托前把目标、约束、已做决策、未决问题、验收标准填进 `objective` / `acceptance` / `constraints` / `decisions` / `open_questions`；缺目标或验收会被拒绝。',
+        '- `rayrun_exec` / `rayrun_files` 只用于委托之外的细粒度操作（查状态、传单个文件）。',
         '- 实际执行、代码修改、构建和产物都放在云电脑上；本地只读取必要输入、查看和汇总，不要在本地产生产物。',
         '- 云电脑不可用时明确说明原因，不要声称已在云端完成。',
       ].join('\n')
@@ -338,6 +437,23 @@ export function apply(ctx, config) {
       })
     } catch {
       // the token is already stored; metadata is best effort
+    }
+  }
+
+  /**
+   * Best-effort model credential creation for cloud agents. The key comes from
+   * the connection form or the host environment and is only forwarded to Rayrun.
+   */
+  const storeModelCredential = async (input) => {
+    const entered = String(input?.modelKey ?? '').trim()
+    const key = entered || String(process.env.DEEPSEEK_API_KEY ?? '').trim()
+    if (!key) return {}
+    try {
+      return { modelCredential: await ray.ensureModelCredential(key) }
+    } catch (error) {
+      // A key picked up from the environment is best effort; a typed one must report.
+      if (!entered) return {}
+      return { modelCredentialError: errorPayload(error).message }
     }
   }
 
@@ -767,10 +883,13 @@ export function apply(ctx, config) {
     if (pinnedId) {
       try {
         const byId = await ray.machine(pinnedId)
-        if (byId) return ray.wake(byId, signal)
+        // A destroyed sandbox still answers GET with status "Terminated"; reusing
+        // it makes every later call fail with "sandbox_not_running".
+        if (byId && byId.status !== 'Terminated') return ray.wake(byId, signal)
       } catch {
-        pinned.delete(key)
+        // fall through to a fresh lookup
       }
+      pinned.delete(key)
     }
 
     const found = (await ray.listMachines()).find((item) => item.id === wanted || item.name === wanted)
@@ -873,6 +992,10 @@ export function apply(ctx, config) {
                 reply(res, 200, { ok: true, target: getTaskTarget(sessionId), machine: settings.sandboxName })
                 return
               }
+              if (action === 'update') {
+                reply(res, 200, { ok: true, update: await updateView(child) })
+                return
+              }
               throw new LocalError('unsupported_action', `Unknown Rayrun action "${action}".`)
             }
             if (method !== 'POST') {
@@ -926,9 +1049,17 @@ export function apply(ctx, config) {
               case 'connection.status':
                 reply(res, 200, { ok: true, connection: await ray.connection() })
                 return
-              case 'connection.save':
-                reply(res, 200, { ok: true, connection: await ray.saveConnection(body) })
+              case 'account':
+                reply(res, 200, { ok: true, account: await ray.account() })
                 return
+              case 'credentials.list':
+                reply(res, 200, { ok: true, credentials: await ray.listCredentials() })
+                return
+              case 'connection.save': {
+                const connection = await ray.saveConnection(body)
+                reply(res, 200, { ok: true, connection, ...(await storeModelCredential(body)) })
+                return
+              }
               case 'connection.test': {
                 const result = await ray.testConnection(body)
                 reply(res, 200, { ok: true, result })
@@ -937,9 +1068,11 @@ export function apply(ctx, config) {
               case 'login.methods':
                 reply(res, 200, { ok: true, methods: await loginMethodsFor(body.baseUrl) })
                 return
-              case 'login.password':
-                reply(res, 200, { ok: true, connection: await loginWithPassword(body) })
+              case 'login.password': {
+                const connection = await loginWithPassword(body)
+                reply(res, 200, { ok: true, connection, ...(await storeModelCredential(body)) })
                 return
+              }
               case 'login.wechat.start':
                 reply(res, 200, { ok: true, ...(await startWechatLogin(body.baseUrl)) })
                 return
@@ -953,7 +1086,14 @@ export function apply(ctx, config) {
                 reply(res, 200, { ok: true, connection: await logoutRayrun() })
                 return
               case 'machine.create': {
-                const machine = await ray.createMachine(body)
+                const input = { ...body }
+                if (String(body.modelKey ?? '').trim()) {
+                  // A key typed in the create dialog becomes this machine's credential.
+                  const created = await ray.ensureModelCredential(body.modelKey)
+                  const list = Array.isArray(body.credentials) ? body.credentials : []
+                  input.credentials = [...new Set([...list, created.name])]
+                }
+                const machine = await ray.createMachine(input)
                 reply(res, 200, { ok: true, machine })
                 return
               }
@@ -975,6 +1115,27 @@ export function apply(ctx, config) {
               case 'machine.desktopRepair': {
                 const result = await ray.repairDesktop(String(body.id ?? ''))
                 reply(res, 200, { ok: true, result })
+                return
+              }
+              case 'update.check': {
+                await checkForUpdate()
+                reply(res, 200, { ok: true, update: await updateView(child) })
+                return
+              }
+              case 'update.apply': {
+                const manager = child.get('pluginManager')
+                if (!manager) {
+                  throw new LocalError('update_unavailable', 'The plugin manager is not mounted in this profile.')
+                }
+                const before = await updateView(child)
+                if (!before.latest || !isNewer(before.latest, ownVersion)) {
+                  throw new LocalError('up_to_date', 'This build is already the newest version.')
+                }
+                if (!before.canApply) {
+                  throw new LocalError('update_locked', 'This install cannot update itself; reinstall it from the Plugins page.')
+                }
+                const result = await applyUpdate(manager, { name: PACKAGE_ID, from: ownVersion, to: before.latest })
+                reply(res, 200, { ok: true, update: { ...before, available: false, canApply: false }, result })
                 return
               }
               default:
@@ -1150,16 +1311,29 @@ export function apply(ctx, config) {
       }
       const machine = await resolveSandbox(args.sandbox, exec.signal)
       const timeout = Math.min(Number(pick(args.timeout_seconds, settings.defaultTimeout)), 3600)
-      const result = await ray.exec(
-        machine.id,
-        {
-          ...(args.command ? { command: String(args.command) } : { argv: args.argv.map(String) }),
-          ...(args.cwd ? { cwd: String(args.cwd) } : {}),
-          ...(args.env && typeof args.env === 'object' ? { env: args.env } : {}),
-          timeout_seconds: timeout,
-        },
-        { timeoutMs: (timeout + 120) * 1000, signal: exec.signal },
-      )
+      const holder = `exec on ${machine.name ?? machine.id}`
+      cancelIdleStop(machine.id)
+      workspaceLocks.acquire(machine.id, {
+        holder,
+        reason: lockReason('exec', args.command ?? (args.argv ?? []).join(' ')),
+        ttlMs: (timeout + 120) * 1000,
+      })
+      let result
+      try {
+        result = await ray.exec(
+          machine.id,
+          {
+            ...(args.command ? { command: String(args.command) } : { argv: args.argv.map(String) }),
+            ...(args.cwd ? { cwd: String(args.cwd) } : {}),
+            ...(args.env && typeof args.env === 'object' ? { env: args.env } : {}),
+            timeout_seconds: timeout,
+          },
+          { timeoutMs: (timeout + 120) * 1000, signal: exec.signal },
+        )
+      } finally {
+        workspaceLocks.release(machine.id, holder)
+      }
+      scheduleIdleStop(machine)
       return {
         sandbox: machine.name ?? machine.id,
         exit_code: result?.exit_code ?? null,
@@ -1286,6 +1460,13 @@ export function apply(ctx, config) {
     async execute(args, exec) {
       const machine = await resolveSandbox(args.sandbox, exec.signal)
       const budget = Math.min(Number(pick(args.timeout_seconds, 900)), 3600) * 1000
+      const holder = `agent task on ${machine.name ?? machine.id}`
+      cancelIdleStop(machine.id)
+      workspaceLocks.acquire(machine.id, {
+        holder,
+        reason: lockReason('agent', args.prompt),
+        ttlMs: budget + 120_000,
+      })
       const controller = new AbortController()
       const onAbort = () => controller.abort(exec.signal?.reason)
       exec.signal?.addEventListener('abort', onAbort, { once: true })
@@ -1328,6 +1509,7 @@ export function apply(ctx, config) {
           .map(([kind, count]) => (count > 1 ? `${kind}×${count}` : kind))
           .join(', ')
         const answer = (final || messages.join('\n') || narration.join('\n')).trim()
+        scheduleIdleStop(machine)
         return {
           sandbox: machine.name ?? machine.id,
           finished,
@@ -1342,6 +1524,7 @@ export function apply(ctx, config) {
             .join(' · '),
         }
       } finally {
+        workspaceLocks.release(machine.id, holder)
         clearTimeout(timer)
         exec.signal?.removeEventListener('abort', onAbort)
         controller.abort()
@@ -1352,6 +1535,273 @@ export function apply(ctx, config) {
       title: 'Rayrun agent task',
       kind: 'other',
       rawInput: clamp(String(args.prompt), 200),
+    }),
+  })
+
+  /**
+   * The cloud worker layer. Phase 0 established that the machine agent is a DSH
+   * boot inside the guest (`dsh --profile headless` with $DSH_HOME on the
+   * workspace), so the profile under `$DSH_HOME/profiles/headless` decides what
+   * that agent can do. `sync` writes the local projection there; `status` reads
+   * it back and compares revisions instead of assuming the upload landed.
+   */
+  const localProfile = () => {
+    try {
+      const context = typeof ctx.get === 'function' ? ctx.get('profileContext') : undefined
+      if (context && typeof context.dir === 'string' && context.dir) {
+        return { name: String(context.name ?? 'unknown'), dir: context.dir }
+      }
+    } catch {
+      // a Host without a profile context still gets a projection, just no provenance
+    }
+    return { name: null, dir: null }
+  }
+
+  const projectWorker = async () => {
+    const profile = localProfile()
+    return exportProfileProjection({
+      sourceProfile: profile.name,
+      sourceDir: profile.dir,
+      plugin: { name: PACKAGE_ID, version: ownVersion },
+      pluginFiles: await readPluginFiles(PACKAGE_DIR),
+    })
+  }
+
+  /** The local session's event count, used as the delegation's sessionSeq. */
+  const sessionSeqOf = (agent) => {
+    try {
+      const session = agent?.session
+      const id = typeof session === 'string' ? session : session?.id
+      const store = typeof ctx.get === 'function' ? ctx.get('sessions') : undefined
+      const live = (id && typeof store?.get === 'function' && store.get(id)) || (session && typeof session === 'object' ? session : undefined)
+      const length = live?.log?.length
+      return Number.isSafeInteger(length) ? length : null
+    } catch {
+      return null
+    }
+  }
+
+  ctx.tools.register({
+    name: 'rayrun_dsh',
+    description:
+      'Manage the DSH worker layer of a Rayrun cloud computer, and delegate tasks to it. The machine agent is a DSH boot inside the guest, so the profile under its $DSH_HOME decides what it may do: `sync` writes the local profile projection (worker layer plus this plugin) into that profile and verifies it landed, `status` reads it back. `delegate` mirrors the workspace, hands the worker a Context Pack (.dsh/handoff/<taskId>/), waits for the run, checks that the worker echoed the version triple, and pulls back what it wrote to .dsh/results/<taskId>/.',
+    parameters: objectSchema({
+      action: {
+        type: 'string',
+        required: true,
+        enum: ['sync', 'status', 'delegate'],
+        description: 'sync (write and verify the worker layer) | status (read it back) | delegate (hand one task to the cloud worker).',
+      },
+      sandbox: sandboxParam,
+      objective: {
+        type: 'string',
+        description: 'delegate, required: the one task the cloud worker must complete, stated once and completely.',
+      },
+      acceptance: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'delegate, required: how the result will be judged; the worker reads it from handoff.md.',
+      },
+      constraints: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'delegate: limits the worker must respect.',
+      },
+      decisions: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'delegate: decisions already made locally that the worker must not revisit.',
+      },
+      open_questions: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'delegate: questions to report back instead of guessing.',
+      },
+      context: {
+        type: 'string',
+        description: 'delegate: short local context worth carrying over (decisions, findings); goes to conversation.md.',
+      },
+      task_id: {
+        type: 'string',
+        description:
+          'delegate: continue an existing task (same .dsh/handoff/<task_id>, next round). Omit to start a new task; the reply reports the task id.',
+      },
+      timeout_seconds: {
+        type: 'integer',
+        minimum: 1,
+        maximum: 3600,
+        description: 'delegate: give up after this many seconds. Defaults to 900.',
+      },
+    }),
+    output: {
+      schema: { type: 'string', description: 'Worker profile path, revision matches, and the cloud DSH/Node versions.' },
+      render: (_args, value) => [{ type: 'text', text: String(value) }],
+    },
+    async execute(args, exec) {
+      const action = String(args.action)
+      const projection = await projectWorker()
+      const pluginLine = (plugin) =>
+        plugin ? `plugin ${plugin.name} ${shortRev(plugin.remoteRev)}${plugin.synced === false ? ' (stale)' : ''}` : 'plugin not projected'
+      if (action === 'status') {
+        const machine = await resolveExisting(args.sandbox)
+        const remote = await readCloudWorker(ray, machine, projection, { signal: exec.signal })
+        const layerSynced = remote.remoteRev === projection.rev
+        const pluginSynced = remote.plugin?.remoteRev === projection.pluginRev
+        return [
+          `${machine.name ?? machine.id}: ${layerSynced && pluginSynced ? 'projection synced' : 'projection stale'}`,
+          `profile ${remote.profile.dir} · layer local ${shortRev(projection.rev)} / remote ${shortRev(remote.remoteRev)}`,
+          `plugin ${PACKAGE_ID} local ${ownVersion} · projected ${shortRev(projection.pluginRev)} / remote ${shortRev(remote.plugin?.remoteRev)}`,
+          `dsh ${remote.dsh ?? 'unknown'} · node ${remote.node ?? 'unknown'} · cloudMode ${remote.layerRows > 0 ? 'applied' : 'not applied'}`,
+          remote.manifest?.sourceProfile
+            ? `synced from the "${remote.manifest.sourceProfile}" profile${remote.manifest.generatedAt ? ` at ${remote.manifest.generatedAt}` : ''}`
+            : 'no projection manifest on the machine',
+        ].join('\n')
+      }
+      if (action === 'delegate') {
+        const machine = await resolveSandbox(args.sandbox, exec.signal)
+        cancelIdleStop(machine.id)
+        const result = await delegateTask({
+          ray,
+          machine,
+          localDir: localDirectory(exec.agent),
+          brief: {
+            objective: args.objective,
+            acceptance: args.acceptance,
+            constraints: args.constraints,
+            decisions: args.decisions,
+            openQuestions: args.open_questions,
+          },
+          notes: args.context,
+          taskId: args.task_id,
+          timeoutMs: Math.min(Number(pick(args.timeout_seconds, 900)), 3600) * 1000,
+          signal: exec.signal,
+          locks: workspaceLocks,
+          project: projectWorker,
+          sessionSeq: sessionSeqOf(exec.agent),
+        })
+        const idleMinutes = scheduleIdleStop(machine)
+        return [
+          `${result.taskId} on ${result.machine}: round ${result.round} ${result.finished ? 'finished' : 'still running'}${result.outcome ? ` (${result.outcome})` : ''}`,
+          `revs sessionSeq=${result.revs.sessionSeq ?? 'null'} workspaceRev=${shortRev(result.revs.workspaceRev)} profileRev=${shortRev(result.revs.profileRev)} · echoed: ${result.echoed ? 'matched' : 'MISSING'}`,
+          result.echoed
+            ? ''
+            : '⚠ worker 没有回显 revs：它可能没读到 handoff；先在云端确认 .dsh/handoff/<taskId>/ 是否存在',
+          `pack ${result.packDir} · results ${result.results.length ? `${result.resultsDir} (${result.results.join(', ')})` : 'none'}${result.resynced ? ' · profile resynced' : ''}${result.cost ? ` · cost $${result.cost.toFixed(4)}` : ''}${result.vmHours ? ` · ${result.vmHours.toFixed(3)} vm-h` : ''}`,
+          result.results.includes('questions.md')
+            ? `worker 有未决问题：见 ${result.resultsDir}/questions.md；用 task_id=${result.taskId} 再委托一轮带上答案`
+            : '',
+          idleMinutes ? `auto-stop in ${idleMinutes} min` : '',
+          result.text ? `--- worker result ---\n${clamp(result.text)}` : '',
+        ]
+          .filter(Boolean)
+          .join('\n')
+      }
+      if (action !== 'sync') throw new Error('Unknown action; use "sync", "status" or "delegate".')
+      const machine = await resolveSandbox(args.sandbox, exec.signal)
+      const result = await syncCloudWorker(ray, machine, projection, { signal: exec.signal })
+      if (!result.synced) {
+        throw new LocalError(
+          'projection_not_applied',
+          `The cloud profile kept a different layer (remote ${shortRev(result.remoteRev)}, local ${shortRev(projection.rev)}); check the machine's write permissions.`,
+        )
+      }
+      if (result.plugin && !result.plugin.synced) {
+        throw new LocalError(
+          'plugin_not_applied',
+          `The cloud profile kept different plugin files (remote ${shortRev(result.plugin.remoteRev)}, local ${shortRev(result.plugin.rev)}); check the machine's write permissions.`,
+        )
+      }
+      return [
+        `${machine.name ?? machine.id}: projection synced`,
+        `profile ${result.profile.dir} · layer rev ${shortRev(result.rev)}`,
+        `wrote ${result.uploaded.join(', ')} · profile backup ${result.backup}`,
+        `${pluginLine(result.plugin)}${result.bundleAdded ? ' · bundle added' : ' · bundle present'} · cloudMode ${result.layerRows > 0 ? 'applied' : 'not applied'}`,
+        `dsh ${result.dsh ?? 'unknown'} · node ${result.node ?? 'unknown'}`,
+        projection.manifest.sourceProfile ? `source profile "${projection.manifest.sourceProfile}"` : '',
+      ]
+        .filter(Boolean)
+        .join('\n')
+    },
+    presentCall: (args) => ({
+      card: 'generic',
+      title: `Rayrun DSH ${args.action}${args.sandbox ? ` ${args.sandbox}` : ''}`,
+      kind: 'other',
+    }),
+  })
+
+  /**
+   * Workspace projection. `push` mirrors the checkout into the cloud workspace
+   * and proves the result (same HEAD, same dirty-patch digest); `pull` only
+   * brings the cloud's changes back for review, because the local tree stays the
+   * merge authority.
+   */
+  ctx.tools.register({
+    name: 'rayrun_workspace',
+    description:
+      'Mirror the local git checkout to a Rayrun cloud computer and bring its changes back. `push` sends the commits (git bundle) plus dirty and untracked files, then verifies the cloud HEAD and dirty-patch digest; it refuses while a cloud task holds the workspace or when the cloud tree moved since the last push, unless `force` is set. `pull` writes the cloud diff into .dsh/incoming for local review and applies nothing.',
+    parameters: objectSchema({
+      action: {
+        type: 'string',
+        required: true,
+        enum: ['push', 'pull'],
+        description: 'push (local → cloud, verified) | pull (cloud → .dsh/incoming, not applied).',
+      },
+      sandbox: sandboxParam,
+      force: {
+        type: 'boolean',
+        description:
+          'push only: replace a busy or drifted cloud workspace anyway. Discards cloud-side files that were never pulled, so use it only when that is intended.',
+      },
+    }),
+    output: {
+      schema: { type: 'string', description: 'Cloud workspace path, HEAD and digest match, or the downloaded diff location.' },
+      render: (_args, value) => [{ type: 'text', text: String(value) }],
+    },
+    async execute(args, exec) {
+      const action = String(args.action)
+      const localDir = localDirectory(exec.agent)
+      if (action === 'pull') {
+        const machine = await resolveExisting(args.sandbox)
+        const result = await pullWorkspace(ray, machine, { localDir, signal: exec.signal })
+        return [
+          `${machine.name ?? machine.id}: pulled workspace changes`,
+          `cloud HEAD ${shortRev(result.cloudHead)} · ${result.changed} changed entries · ${result.patchFiles} files in the diff`,
+          `patch ${result.patchBytes} B → ${result.patchPath}`,
+          'nothing applied: review the patch, then `git apply` (or discard) locally',
+        ].join('\n')
+      }
+      if (action !== 'push') throw new Error('Unknown action; use "push" or "pull".')
+      const machine = await resolveSandbox(args.sandbox, exec.signal)
+      const result = await pushWorkspace(ray, machine, {
+        localDir,
+        force: args.force === true,
+        lock: workspaceLocks.status(machine.id),
+        signal: exec.signal,
+      })
+      if (!result.headMatched || !result.digestMatched || !result.applied) {
+        throw new LocalError(
+          'workspace_not_mirrored',
+          [
+            `The cloud workspace did not mirror the local checkout`,
+            `HEAD local ${shortRev(result.head)} / cloud ${shortRev(result.cloudHead)}`,
+            `digest local ${shortRev(result.localDigest)} / cloud ${shortRev(result.cloudDigest)}`,
+            result.applyError ? `git apply: ${result.applyError}` : '',
+          ]
+            .filter(Boolean)
+            .join(' · '),
+        )
+      }
+      return [
+        `${machine.name ?? machine.id}: workspace mirrored at ${result.root}`,
+        `HEAD ${shortRev(result.head)} (matched) · dirty digest ${shortRev(result.localDigest)} (matched) · ${result.decision}`,
+        `dirty patch ${result.patchBytes} B / ${result.patchFiles} files · untracked ${result.untracked.length} files (${result.untrackedBytes} B) · bundle ${result.bundleBytes} B`,
+        `cloud status entries: ${result.cloudStatusLines}`,
+      ].join('\n')
+    },
+    presentCall: (args) => ({
+      card: 'generic',
+      title: `Rayrun workspace ${args.action}${args.sandbox ? ` ${args.sandbox}` : ''}`,
+      kind: 'other',
     }),
   })
 }
