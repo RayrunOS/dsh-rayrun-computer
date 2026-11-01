@@ -9,7 +9,7 @@
   },
   "homepage": "https://github.com/RayrunOS/dsh-rayrun-computer",
   "type": "module",
-  "description": "Rayrun cloud computers inside DeepSeek Harness: create, manage and open remote Linux desktops, with agent tools for the same machines.",
+  "description": "Rayrun cloud computers inside DeepSeek Harness: create, manage and open remote Linux desktops (noVNC) from the sidebar, and let the agent run commands, move files and delegate whole tasks on the same machines via rayrun_* tools. Switch per-session between cloud and local; password or WeChat login, token stored in the Harness vault.",
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",
