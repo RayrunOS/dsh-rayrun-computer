@@ -89,7 +89,7 @@ pnpm pack        # 或 npm pack
 dsh plugin --profile web add /abs/path/dsh-rayrun-computer-2.0.0.tgz
 ```
 
-tarball 包含 `package.json` 的 `files` 列出的文件（外加 npm 始终会带的 `LICENSE`）：`index.js`、`client.js`、`lib/*.js`、`locale/*.json`、`cordis.patch.yml`、`icon.svg`、`README.md`，足够 Host 与 Client 运行。
+tarball 包含 `package.json` 的 `files` 列出的文件（外加 npm 始终会带的 `LICENSE`）：`index.js`、`client.js`、`lib/*.js`、`locale/*.json`、`cordis.patch.yml`、`icon.png`、`README.md`，足够 Host 与 Client 运行。
 
 ### 2.4 让 Creator 模式的 agent 代装
 

@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="docs/images/logo.png" width="96" height="96" alt="Rayrun Cloud Computer">
+  <img src="icon.png" width="96" height="96" alt="Rayrun Cloud Computer">
   <h1>dsh-rayrun-computer</h1>
   <p><strong>Rayrun cloud computers, inside DeepSeek Harness.</strong><br>
   A real Linux desktop in your sidebar — and a sandbox the agent can drive.</p>

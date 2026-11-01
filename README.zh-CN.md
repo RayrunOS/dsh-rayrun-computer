@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="docs/images/logo.png" width="96" height="96" alt="Rayrun 云电脑">
+  <img src="icon.png" width="96" height="96" alt="Rayrun 云电脑">
   <h1>dsh-rayrun-computer</h1>
   <p><strong>DSH 里的 Rayrun 云电脑。</strong><br>
   侧边栏就能打开的 Linux 桌面，也是模型能直接驱动的沙箱。</p>

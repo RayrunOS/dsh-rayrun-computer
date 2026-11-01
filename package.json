@@ -14,7 +14,7 @@
     ".": "./index.js",
     "./client": "./client.js",
     "./locale/*.json": "./locale/*.json",
-    "./icon": "./icon.svg"
+    "./icon": "./icon.png"
   },
   "files": [
     "index.js",
@@ -22,7 +22,7 @@
     "lib/*.js",
     "cordis.patch.yml",
     "locale/*.json",
-    "icon.svg",
+    "icon.png",
     "README.md"
   ],
   "dsh": {
