@@ -87,4 +87,4 @@ Client 半区只在页面启动时加载。改完 `client.js`：
 
 ---
 
-相关文档：[使用手册](usage.md) · [安装指南](installation.md) · [README](../README.md)
+相关文档：[使用手册](usage.md) · [安装指南](installation.md) · [README 中文版](../README.zh-CN.md)

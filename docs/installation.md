@@ -236,4 +236,4 @@ plugin_manager install_bundle  target = /abs/path/to/dsh-rayrun-computer
 
 ---
 
-相关文档：[README](../README.md) · [使用手册](usage.md) · [云上/本地一致性方案](cloud-dsh-parity-plan.md)
+相关文档：[README 中文版](../README.zh-CN.md) · [使用手册](usage.md) · [云上/本地一致性方案](cloud-dsh-parity-plan.md)

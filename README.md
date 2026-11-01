@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="icon.svg" width="96" height="96" alt="Rayrun Cloud Computer icon">
+  <img src="docs/images/logo.png" width="96" height="96" alt="Rayrun Cloud Computer">
   <h1>dsh-rayrun-computer</h1>
   <p><strong>Rayrun cloud computers, inside DeepSeek Harness.</strong><br>
   A real Linux desktop in your sidebar — and a sandbox the agent can drive.</p>
@@ -8,16 +8,14 @@
     <img alt="No runtime dependencies" src="https://img.shields.io/badge/runtime%20deps-none-brightgreen?style=flat-square">
     <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-blue?style=flat-square"></a>
   </p>
-  <p><a href="#english">English</a> · <a href="#中文">简体中文</a></p>
+  <p><strong>English</strong> · <a href="README.zh-CN.md">简体中文</a></p>
 </div>
-
-## English
 
 [Rayrun](https://rayrunos.com/) sells cloud Linux machines by the second: disposable boxes with their own CPU, memory and a persistent workspace. This bundle turns them into **cloud computers** inside DeepSeek Harness (DSH) — create one from the sidebar, open its desktop in the page, or let the agent run commands, move files and hand off whole tasks on it.
 
 The rule is **local-first**. The cloud is a worker, not a second home: your checkout stays the source of truth, pushes are verified down to the patch SHA-256, and anything pulled back lands in `.dsh/incoming/` for you to read before applying.
 
-### What you get
+## What you get
 
 - **Cloud computers in the sidebar.** Create one with a wizard (image, vCPU, RAM, and a model credential if its agent will call a model), then start, pause, resume, shut down, rename or destroy it. Cards show status, image, spec, IP and machine hours; the header shows balance and total hours.
 - **A real desktop, in the page.** Machines created with a remote desktop publish their noVNC port: open it inline, in a new window, or fullscreen. One click reveals the VNC password. Images whose empty `/etc/hosts` breaks `websockify` (the WebSocket closes with 1011) are repaired automatically when the desktop connects.
@@ -28,7 +26,7 @@ The rule is **local-first**. The cloud is a worker, not a second home: your chec
 - **Login without copy-paste.** Username and password, or WeChat. A token is created for you and stored in the Harness vault, host side only.
 - **Optional auto-stop and updates.** Stop idle machines after a task (never destroy), and update the bundle from the page once a new version is published.
 
-### How it fits together
+## How it fits together
 
 ```mermaid
 flowchart LR
@@ -42,7 +40,7 @@ flowchart LR
   page -.->|"noVNC over ingress"| vm
 ```
 
-### Quick start
+## Quick start
 
 **Requirements**
 
@@ -66,7 +64,7 @@ The desktop app and `dsh web` use different profiles (`desktop` and `web`), so i
 
 Sanity check: ask the agent to list your machines. With no token it must answer `token_required`, never pretend the work happened.
 
-### Tools
+## Tools
 
 | Tool | What it does |
 | --- | --- |
@@ -77,7 +75,7 @@ Sanity check: ask the agent to list your machines. With no token it must answer 
 | `rayrun_dsh` | `sync` the worker layer, `status` compare it, `delegate` a task to the cloud worker |
 | `rayrun_workspace` | `push` a verified copy of your checkout, `pull` the cloud diff for review |
 
-### Configuration
+## Configuration
 
 Bundle defaults live in `cordis.patch.yml`; override only what you need in your profile:
 
@@ -94,7 +92,7 @@ Bundle defaults live in `cordis.patch.yml`; override only what you need in your 
 
 Every key is documented in the [usage manual](docs/usage.md#配置项); the token lookup order is [here](docs/usage.md#token-与-api-地址).
 
-### Docs
+## Docs
 
 The detailed docs are in Chinese for now.
 
@@ -105,7 +103,7 @@ The detailed docs are in Chinese for now.
 | [Parity design](docs/cloud-dsh-parity-plan.md) | why the cloud worker layer exists, what syncs and what does not |
 | [Development](docs/development.md) | module map, checks, tests, live integration |
 
-### Security and caveats
+## Security and caveats
 
 - **The token stays on the host.** The page talks to `/plugins/rayrun/rpc` (same-origin, checked) and never receives it; passwords live in memory only.
 - **`destroy` is irreversible** — the machine and its workspace are deleted together.
@@ -113,7 +111,7 @@ The detailed docs are in Chinese for now.
 - **The cloud image is already root.** It ships without bubblewrap, so the worker layer sets `danger-full-access` to make shells work. That is a workaround, not isolation.
 - **A bundle's host code runs inside the DSH process.** Install it from a source you trust.
 
-### Development
+## Development
 
 ```bash
 node --check index.js
@@ -123,119 +121,6 @@ node test/tool-routing.mjs
 ```
 
 No build step and no runtime dependencies; `client.js` only loads modules DSH provides. Full check and test matrix: [docs/development.md](docs/development.md).
-
-## 中文
-
-[Rayrun](https://rayrunos.com/) 按秒出租云端 Linux 机器：独立的 CPU、内存，加上持久化工作区，用完就可以扔。这个插件把它们变成 DSH 里的**云电脑**——在侧边栏创建，在页面里打开远程桌面，或者直接让模型在上面跑命令、传文件、委托整段任务。
-
-原则是**本地优先**。云上只是 worker，不是第二个家：你的 checkout 是唯一事实来源，推送会校验到 patch 的 SHA-256，拉回的改动先落在 `.dsh/incoming/` 等你审阅，再决定要不要应用。
-
-### 有什么
-
-- **侧边栏里的云电脑。** 选镜像、vCPU、内存（以及给机器内 agent 用的模型凭证）创建，之后开机、暂停、恢复、关机、重命名、销毁。卡片展示状态、镜像、规格、IP 和机时，顶部显示余额和累计机时。
-- **页面里的真桌面。** 创建时开启远程桌面的机器会发布 noVNC 端口，可以内嵌打开、新窗口打开或全屏；桌面密码一键取。镜像里空 `/etc/hosts` 导致 `websockify` 解析失败（WebSocket 以 1011 关闭）的问题，会在连接桌面时自动修好。
-- **给模型用的工具。** `rayrun_sandbox`、`rayrun_exec`、`rayrun_files`、`rayrun_agent`，以及云上 worker 的 `rayrun_dsh` 和 `rayrun_workspace`。
-- **按会话切换云上 / 本地。** 输入区的切换是**真路由**，不是提示词：云上模式下 Host 直接拒绝本地 `pwsh` / `bash` / `write` / `edit`，模型没法偷偷在本地干活；只读工具仍然可用，用来审阅和汇总。
-- **和本地一致的 worker。** 往机器的 headless profile 推一层 worker 图层，用哈希校验它真的生效；把整段任务连同目标和验收标准委托过去，拿回结果，支持多轮。
-- **可核对的工作区同步。** `push` 用 git bundle 带走提交，再带脏改动和未跟踪文件，两边各自重算 patch 的 SHA-256；`pull` 只把云端 diff 写进 `.dsh/incoming/<时间戳>/`，不会自动应用。
-- **不用手动复制 Token。** 账号密码或微信登录，登录后自动创建 Token 并存入 Harness 凭证库，只存在 Host 侧。
-- **可选的自动停机与更新。** 任务结束后空闲多久自动关机（永不销毁），以及页面里的一键更新。
-
-### 架构
-
-```mermaid
-flowchart LR
-  subgraph you["你的电脑"]
-    page["DSH 页面<br/>侧边栏 · 桌面 · 切换"]
-    host["插件 Host<br/>同源 RPC · 工具"]
-    page <--> host
-  end
-  host -->|"HTTPS · Token 只留本地"| api["Rayrun API<br/>api.rayrunos.com/v1"]
-  api --> vm["云电脑<br/>Linux · 持久工作区"]
-  page -.->|"noVNC 走 ingress"| vm
-```
-
-### 快速开始
-
-**要求**
-
-- **DeepSeek Harness** 在 `0.2.1-rc.5` 上验证过 — 桌面应用或 `dsh web`。
-- **一个 Rayrun 账号**，来自 [rayrunos.com](https://rayrunos.com/)；Token 由插件自动创建。
-- **Chrome / Edge** 只有微信登录需要；其他情况可选。
-
-这个包**还没有发布到 npm**，从 checkout 安装：
-
-```bash
-git clone https://github.com/RayrunOS/dsh-rayrun-computer.git
-```
-
-1. 在 **插件 → 添加插件** 里填这个 checkout 的绝对路径；或者在终端执行
-   `dsh plugin --profile web add /abs/path/dsh-rayrun-computer`
-2. **重启 DSH。** Client 半区只在页面启动时加载。
-3. 打开 **云电脑 → 连接设置**，用 Rayrun 账号登录，或粘贴已有的 API Token。
-4. **新建云电脑** → 选镜像、内存至少 2 GB、开启远程桌面 → **创建并打开**（约 15 秒）。
-
-桌面应用和 `dsh web` 用的是两个 profile（`desktop` 和 `web`），装到你实际会打开的那一个。更多安装方式和排障见[安装指南](docs/installation.md)。
-
-自检：让模型列一下你的机器。没配 Token 时它必须报 `token_required`，而不是说「已完成」。
-
-### 工具
-
-| 工具 | 作用 |
-| --- | --- |
-| `rayrun_sandbox` | create · list · inspect · start · stop · pause · resume · destroy |
-| `rayrun_exec` | 执行非交互命令（`/bin/sh -c` 或 argv），返回 exit code、stdout、stderr |
-| `rayrun_files` | 列目录、上传、下载机器工作区里的文件 |
-| `rayrun_agent` | 把整段任务交给机器内的 agent，流式等待结果 |
-| `rayrun_dsh` | `sync` 推送并校验 worker 图层，`status` 只读比对，`delegate` 委托任务 |
-| `rayrun_workspace` | `push` 推送并校验 checkout，`pull` 回传云端 diff 供审阅 |
-
-### 配置
-
-bundle 的默认值在 `cordis.patch.yml`；只覆盖你要改的键：
-
-```yaml
-# $DSH_HOME/profiles/<profile>/cordis.patch.yml
-- id: rayrun-cloud
-  name: 'dsh-rayrun-computer'
-  config:
-    sandboxName: dsh-workspace
-    idle_stop_minutes: 15    # 空闲后自动关机，永不销毁
-    egress_allow:            # 新机器默认没有出向网络
-      - api.deepseek.com
-```
-
-完整的配置项见[使用手册](docs/usage.md#配置项)，Token 解析顺序见[这里](docs/usage.md#token-与-api-地址)。
-
-### 文档
-
-| 文档 | 内容 |
-| --- | --- |
-| [安装指南](docs/installation.md) | 各种安装方式、第一次连接、常见问题 |
-| [使用手册](docs/usage.md) | 远程桌面、云上/本地切换、worker 图层、工作区同步、委托、自动停机、完整配置与工具参考 |
-| [一致性方案](docs/cloud-dsh-parity-plan.md) | 为什么要有云上 worker 图层，什么同步、什么不同步 |
-| [开发与自测](docs/development.md) | 模块地图、检查与测试命令、联调 |
-
-### 安全边界
-
-- **Token 只存在 Host 侧。** 页面通过同源的 `/plugins/rayrun/rpc` 调用（校验 `Origin`），拿不到 Token；密码只存在内存。
-- **`destroy` 不可恢复**——机器和工作区数据一起删除。
-- **新建机器默认没有出向网络。** 装包或调外部 API 之前，得先在 `egress_allow` 里列出来。
-- **云上镜子里本来就是 root。** 镜像没有 bubblewrap，worker 图层只能覆盖成 `danger-full-access` 让 shell 可用；这是绕路，不是隔离。
-- **bundle 的 Host 代码跑在 DSH 进程里。** 只从你信任的来源安装。
-
-### 开发
-
-```bash
-node --check index.js
-node --check client.js
-node test/security.mjs
-node test/tool-routing.mjs
-```
-
-没有构建步骤，也没有运行时依赖；`client.js` 只用 DSH 提供的内建模块。完整的检查与测试清单见[开发与自测](docs/development.md)。
-
----
 
 ## License
 

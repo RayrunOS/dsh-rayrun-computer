@@ -287,4 +287,4 @@ API 地址优先级：页面保存的地址（`~/.rayrun/dsh.json`）→ 插件 
 
 ---
 
-相关文档：[安装指南](installation.md) · [开发与自测](development.md) · [一致性方案](cloud-dsh-parity-plan.md) · [README](../README.md)
+相关文档：[安装指南](installation.md) · [开发与自测](development.md) · [一致性方案](cloud-dsh-parity-plan.md) · [README 中文版](../README.zh-CN.md)
