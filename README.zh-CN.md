@@ -11,7 +11,7 @@
   <p><a href="README.md">English</a> · <strong>简体中文</strong></p>
 </div>
 
-[Rayrun](https://rayrunos.com/) 按秒出租云端 Linux 机器：独立的 CPU、内存，加上持久化工作区，用完就可以扔。这个插件把它们变成 DSH 里的**云电脑**——在侧边栏创建，在页面里打开远程桌面，或者直接让模型在上面跑命令、传文件、委托整段任务。
+这个插件把**云电脑**接进 DeepSeek Harness（DSH）：在侧边栏创建 Linux 机器，在页面里打开远程桌面，或者直接让模型在上面跑命令、传文件、委托整段任务。每台机器有独立的 CPU、内存和持久化工作区，模型可以在上面一轮接一轮地做下去。
 
 原则是**本地优先**。云上只是 worker，不是第二个家：你的 checkout 是唯一事实来源，推送会校验到 patch 的 SHA-256，拉回的改动先落在 `.dsh/incoming/` 等你审阅，再决定要不要应用。
 
@@ -63,6 +63,10 @@ git clone https://github.com/RayrunOS/dsh-rayrun-computer.git
 桌面应用和 `dsh web` 用的是两个 profile（`desktop` 和 `web`），装到你实际会打开的那一个。更多安装方式和排障见[安装指南](docs/installation.md)。
 
 自检：让模型列一下你的机器。没配 Token 时它必须报 `token_required`，而不是说「已完成」。
+
+## 机器与计费
+
+机器来自 [Rayrun](https://rayrunos.com/)，按秒计费。侧边栏顶部显示账户余额和累计机时。
 
 ## 工具
 

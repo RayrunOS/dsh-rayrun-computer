@@ -11,7 +11,7 @@
   <p><strong>English</strong> · <a href="README.zh-CN.md">简体中文</a></p>
 </div>
 
-[Rayrun](https://rayrunos.com/) sells cloud Linux machines by the second: disposable boxes with their own CPU, memory and a persistent workspace. This bundle turns them into **cloud computers** inside DeepSeek Harness (DSH) — create one from the sidebar, open its desktop in the page, or let the agent run commands, move files and hand off whole tasks on it.
+This bundle brings **cloud computers** into DeepSeek Harness (DSH): create a Linux machine from the sidebar, open its desktop in the page, or let the agent run commands, move files and hand off whole tasks on it. Each machine has its own CPU, memory and a persistent workspace, so the agent can keep working there round after round.
 
 The rule is **local-first**. The cloud is a worker, not a second home: your checkout stays the source of truth, pushes are verified down to the patch SHA-256, and anything pulled back lands in `.dsh/incoming/` for you to read before applying.
 
@@ -63,6 +63,10 @@ git clone https://github.com/RayrunOS/dsh-rayrun-computer.git
 The desktop app and `dsh web` use different profiles (`desktop` and `web`), so install into the one you actually open. More install paths and fixes: [installation guide](docs/installation.md).
 
 Sanity check: ask the agent to list your machines. With no token it must answer `token_required`, never pretend the work happened.
+
+## Machines and billing
+
+Machines come from [Rayrun](https://rayrunos.com/) and are billed by the second. The sidebar header shows your balance and total machine hours.
 
 ## Tools
 
