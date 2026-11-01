@@ -9,7 +9,7 @@
  * `/plugins/rayrun/rpc` route; it never sees the API token.
  */
 window.__ModuleLoader__.load({
-  id: '@local/dsh-plugin-rayrun-computer',
+  id: 'dsh-rayrun-computer',
   factory(require) {
     const React = require('react')
     const h = React.createElement

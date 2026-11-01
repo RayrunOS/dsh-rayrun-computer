@@ -1,4 +1,6 @@
-# Rayrun 云电脑 — DeepSeek Harness 插件
+# dsh-rayrun-computer
+
+Rayrun 云电脑 — DeepSeek Harness 插件
 
 把 [Rayrun](https://rayrunos.com/) 的云端沙箱做成 DSH 里的「云电脑」：左侧边栏有独立入口，可以创建、开关机、查看规格，并在页面里直接打开 Rayrun 的 noVNC 远程桌面。同一批机器也继续暴露为 `rayrun_*` 工具，供模型执行命令、搬运文件和跑整段 agent 任务。
 
@@ -51,7 +53,7 @@ plugin_manager install_bundle  target = <这个包的绝对目录>
 
 安装后如果页面还是旧版，重新打开 `dsh web` 打印的**带认证 token 的 URL**（裸 `http://127.0.0.1:<port>` 会返回 401），或重启 DSH。Client 半区只在页面启动时加载；替换/改名已安装的包后，DSH 进程会缓存旧的 client 包路径，重启是最可靠的刷新方式。
 
-> 本次从 `@local/dsh-plugin-rayrun-cloud` 改名为 `@local/dsh-plugin-rayrun-computer`，就是为了让运行中的 DSH 重新扫描 client 包，而不必重启整个应用。如果当前页面仍显示旧版，重新打开认证 URL 即可。
+> 仓库与包名已统一为 `dsh-rayrun-computer`，与 GitHub 仓库 `RayrunOS/dsh-rayrun-computer` 一致。如果当前页面仍显示旧版，重新打开认证 URL 即可。
 
 ## 连接 Rayrun
 

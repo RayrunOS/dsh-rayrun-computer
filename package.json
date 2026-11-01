@@ -1,7 +1,13 @@
 {
-  "name": "@local/dsh-plugin-rayrun-computer",
+  "name": "dsh-rayrun-computer",
   "version": "2.0.0",
   "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/RayrunOS/dsh-rayrun-computer.git"
+  },
+  "homepage": "https://github.com/RayrunOS/dsh-rayrun-computer",
   "type": "module",
   "description": "Rayrun cloud computers inside DeepSeek Harness: create, manage and open remote Linux desktops, with agent tools for the same machines.",
   "exports": {
