@@ -11,7 +11,7 @@
   <p><strong>English</strong> · <a href="README.zh-CN.md">简体中文</a></p>
 </div>
 
-This bundle brings **cloud computers** into DeepSeek Harness (DSH): create a Linux machine from the sidebar, open its desktop in the page, or let the agent run commands, move files and hand off whole tasks on it. Each machine has its own CPU, memory and a persistent workspace, so the agent can keep working there round after round.
+How much work can a cheap-enough cloud host do for DeepSeek Harness? That question is why we built this project — to bring **cloud computers** into DSH: create a Linux machine from the sidebar, open its desktop in the page, or let the agent run commands, move files and hand off whole tasks on it. Each machine has its own CPU, memory and a persistent workspace, so the agent can keep working there round after round.
 
 The rule is **local-first**. The cloud is a worker, not a second home: your checkout stays the source of truth, pushes are verified down to the patch SHA-256, and anything pulled back lands in `.dsh/incoming/` for you to read before applying.
 
