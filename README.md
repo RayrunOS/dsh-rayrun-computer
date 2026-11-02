@@ -77,7 +77,7 @@ Machines come from [Rayrun](https://rayrunos.com/) and are billed by the second.
 | `rayrun_desktop` | screenshot the X11 desktop, then click, type, send keys or scroll on it |
 | `rayrun_files` | list, upload and download files in the machine's workspace |
 | `rayrun_agent` | hand a whole task to the agent inside the machine and wait for the stream |
-| `rayrun_dsh` | `sync` the worker layer, `status` compare it, `delegate` a task to the cloud worker |
+| `rayrun_dsh` | `sync` the worker layer, `status` compare it, `delegate` a task and wait; `start` + `result` delegate without waiting |
 | `rayrun_workspace` | `push` a verified copy of your checkout, `pull` the cloud diff for review |
 
 ## Configuration

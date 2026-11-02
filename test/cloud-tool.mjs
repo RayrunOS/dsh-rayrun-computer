@@ -73,11 +73,11 @@ check('rayrun_workspace exposes push and pull only', () => {
   assert.match(tool.description, /applies nothing/)
 })
 
-check('rayrun_dsh exposes sync, status and delegate, with an optional machine', () => {
+check('rayrun_dsh exposes sync, status, delegate, start and result, with an optional machine', () => {
   const tool = tools.find((item) => item.name === 'rayrun_dsh')
   assert.ok(tool, 'rayrun_dsh is registered')
   assert.equal(tool.parameters.type, 'object')
-  assert.deepEqual(tool.parameters.properties.action.enum, ['sync', 'status', 'delegate'])
+  assert.deepEqual(tool.parameters.properties.action.enum, ['sync', 'status', 'delegate', 'start', 'result'])
   assert.deepEqual(tool.parameters.required, ['action'])
   assert.equal(tool.parameters.properties.sandbox.type, 'string')
   for (const field of ['objective', 'acceptance', 'constraints', 'decisions', 'open_questions', 'context', 'task_id']) {
@@ -85,6 +85,7 @@ check('rayrun_dsh exposes sync, status and delegate, with an optional machine', 
   }
   assert.match(tool.description, /DSH worker layer/)
   assert.match(tool.description, /delegate/)
+  assert.match(tool.description, /outlives this turn/)
   assert.equal(tool.output.render(undefined, 'one line')[0].text, 'one line')
 })
 
@@ -92,7 +93,7 @@ check('an unknown action is rejected before any machine is resolved', async () =
   const tool = tools.find((item) => item.name === 'rayrun_dsh')
   await assert.rejects(
     () => tool.execute({ action: 'deploy' }, { signal: undefined }),
-    (error) => /Unknown action; use "sync", "status" or "delegate"/.test(String(error?.message)),
+    (error) => /Unknown action; use "sync", "status", "delegate", "start" or "result"/.test(String(error?.message)),
   )
 })
 

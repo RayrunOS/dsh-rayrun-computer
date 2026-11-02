@@ -77,7 +77,7 @@ git clone https://github.com/RayrunOS/dsh-rayrun-computer.git
 | `rayrun_desktop` | 截取桌面，并在上面点击、键入、按键、滚动（X11 / xdotool） |
 | `rayrun_files` | 列目录、上传、下载机器工作区里的文件 |
 | `rayrun_agent` | 把整段任务交给机器内的 agent，流式等待结果 |
-| `rayrun_dsh` | `sync` 推送并校验 worker 图层，`status` 只读比对，`delegate` 委托任务 |
+| `rayrun_dsh` | `sync` 推送并校验 worker 图层，`status` 只读比对，`delegate` 委托任务；`start` + `result` 不等待地委托与收取 |
 | `rayrun_workspace` | `push` 推送并校验 checkout，`pull` 回传云端 diff 供审阅 |
 
 ## 配置

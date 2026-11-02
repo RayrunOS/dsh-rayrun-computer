@@ -50,6 +50,7 @@ node test/workspace-lock.mjs    # 单 writer 锁的获取/释放/冲突
 node test/context-pack.mjs      # handoff 目录结构与 secret 拦截
 node test/cloud-tool.mjs        # 用假上下文驱动真实 apply，断言 rayrun_dsh 注册形状与非法 action
 node test/desktop.mjs           # rayrun_desktop：参数校验、X11 命令构造、截图解码、图片块渲染
+node test/async-delegate.mjs    # start/status/result：探针解析、产物取回、锁的释放时机
 node test/security.mjs          # 负向：跨源 POST、超大 body、未知 action、只读响应不含 token
 node test/tool-routing.mjs      # 云上/本地工具路由
 node test/update-unit.mjs       # 版本比较、canAutoUpdate、applyUpdate 回滚

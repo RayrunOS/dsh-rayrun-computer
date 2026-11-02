@@ -26,7 +26,7 @@ import { applyUpdate, canAutoUpdate, fetchLatestVersion, isNewer } from './lib/u
 import { fileURLToPath } from 'node:url'
 import { exportProfileProjection, readCloudWorker, readPluginFiles, syncCloudWorker } from './lib/cloud-dsh.js'
 import { pullWorkspace, pushWorkspace, cloudWorkspaceRoot, readCloudState } from './lib/cloud-workspace.js'
-import { delegateTask } from './lib/delegate.js'
+import { checkTask, collectTask, delegateTask, startTask } from './lib/delegate.js'
 import { DESKTOP_ACTIONS, buildDesktopCommand, decodeScreenshot, desktopFailure } from './lib/desktop.js'
 import { isFinished, kindOf, readFrame, sseFrames } from './lib/sse.js'
 import { WorkspaceLocks } from './lib/workspace-lock.js'
@@ -1762,13 +1762,14 @@ export function apply(ctx, config) {
   ctx.tools.register({
     name: 'rayrun_dsh',
     description:
-      'Manage the DSH worker layer of a Rayrun cloud computer, and delegate tasks to it. The machine agent is a DSH boot inside the guest, so the profile under its $DSH_HOME decides what it may do: `sync` writes the local profile projection (worker layer plus this plugin) into that profile and verifies it landed, `status` reads it back. `delegate` mirrors the workspace, hands the worker a Context Pack (.dsh/handoff/<taskId>/), waits for the run, checks that the worker echoed the version triple, and pulls back what it wrote to .dsh/results/<taskId>/.',
+      'Manage the DSH worker layer of a Rayrun cloud computer, and delegate tasks to it. The machine agent is a DSH boot inside the guest, so the profile under its $DSH_HOME decides what it may do: `sync` writes the local profile projection (worker layer plus this plugin) into that profile and verifies it landed, `status` reads it back. `delegate` mirrors the workspace, hands the worker a Context Pack (.dsh/handoff/<taskId>/), waits for the run, checks that the worker echoed the version triple, and pulls back what it wrote to .dsh/results/<taskId>/. `start` does the same but returns as soon as the prompt is posted, so the run outlives this turn, and `result` collects it later.',
     parameters: objectSchema({
       action: {
         type: 'string',
         required: true,
-        enum: ['sync', 'status', 'delegate'],
-        description: 'sync (write and verify the worker layer) | status (read it back) | delegate (hand one task to the cloud worker).',
+        enum: ['sync', 'status', 'delegate', 'start', 'result'],
+        description:
+          'sync (write and verify the worker layer) | status (read it back) | delegate (hand one task over and wait) | start (hand it over and return) | result (collect a started task).',
       },
       sandbox: sandboxParam,
       objective: {
@@ -1820,6 +1821,23 @@ export function apply(ctx, config) {
       const projection = await projectWorker()
       const pluginLine = (plugin) =>
         plugin ? `plugin ${plugin.name} ${shortRev(plugin.remoteRev)}${plugin.synced === false ? ' (stale)' : ''}` : 'plugin not projected'
+      const briefOf = (input) => ({
+        objective: input.objective,
+        acceptance: input.acceptance,
+        constraints: input.constraints,
+        decisions: input.decisions,
+        openQuestions: input.open_questions,
+      })
+      if (action === 'status' && args.task_id) {
+        const machine = await resolveExisting(args.sandbox)
+        const state = await checkTask({ ray, machine, taskId: args.task_id, signal: exec.signal, locks: workspaceLocks })
+        return [
+          `${state.taskId} on ${state.machine}: ${state.running ? 'worker 仍在跑' : 'worker 未在跑'} · 云端最近改动 ${state.activity}`,
+          `云端 .dsh/results/${state.taskId}: ${state.files.length ? state.files.join(', ') : '（还没有文件）'}`,
+          state.lock ? `workspace 锁：${state.lock.holder}${state.lock.reason ? ` (${state.lock.reason})` : ''}` : 'workspace 锁：空闲',
+          '收取用 action "result" + task_id；status 不下载任何文件。',
+        ].join('\n')
+      }
       if (action === 'status') {
         const machine = await resolveExisting(args.sandbox)
         const remote = await readCloudWorker(ray, machine, projection, { signal: exec.signal })
@@ -1842,13 +1860,7 @@ export function apply(ctx, config) {
           ray,
           machine,
           localDir: localDirectory(exec.agent),
-          brief: {
-            objective: args.objective,
-            acceptance: args.acceptance,
-            constraints: args.constraints,
-            decisions: args.decisions,
-            openQuestions: args.open_questions,
-          },
+          brief: briefOf(args),
           notes: args.context,
           taskId: args.task_id,
           timeoutMs: Math.min(Number(pick(args.timeout_seconds, 900)), 3600) * 1000,
@@ -1874,7 +1886,61 @@ export function apply(ctx, config) {
           .filter(Boolean)
           .join('\n')
       }
-      if (action !== 'sync') throw new Error('Unknown action; use "sync", "status" or "delegate".')
+      if (action === 'start') {
+        const machine = await resolveSandbox(args.sandbox, exec.signal)
+        cancelIdleStop(machine.id)
+        const started = await startTask({
+          ray,
+          machine,
+          localDir: localDirectory(exec.agent),
+          brief: briefOf(args),
+          notes: args.context,
+          taskId: args.task_id,
+          timeoutMs: Math.min(Number(pick(args.timeout_seconds, 900)), 3600) * 1000,
+          signal: exec.signal,
+          locks: workspaceLocks,
+          project: projectWorker,
+          sessionSeq: sessionSeqOf(exec.agent),
+        })
+        return [
+          `${started.taskId} on ${started.machine}: round ${started.round} posted${started.promptId ? ` (prompt ${started.promptId})` : ''}`,
+          `revs sessionSeq=${started.revs.sessionSeq ?? 'null'} workspaceRev=${shortRev(started.revs.workspaceRev)} profileRev=${shortRev(started.revs.profileRev)}${started.resynced ? ' · profile resynced' : ''}`,
+          `pack ${started.packDir} · 结果会落到云端 .dsh/results/${started.taskId}/`,
+          '不等待：云端 worker 自己跑，本轮结束、页面关掉都不影响它。',
+          `轮询 action "status" + task_id=${started.taskId}，收取 action "result" + task_id=${started.taskId}。`,
+          'workspace 锁由这个任务持有到收取为止，期间 push 会被拒绝。',
+        ].join('\n')
+      }
+      if (action === 'result') {
+        if (!args.task_id) throw new Error('`task_id` is required for result.')
+        const machine = await resolveExisting(args.sandbox)
+        const collected = await collectTask({
+          ray,
+          machine,
+          localDir: localDirectory(exec.agent),
+          taskId: args.task_id,
+          signal: exec.signal,
+          locks: workspaceLocks,
+        })
+        const idleMinutes = collected.running ? null : scheduleIdleStop(machine)
+        return [
+          `${collected.taskId} on ${collected.machine}: ${collected.running ? 'worker 仍在跑' : 'worker 已结束'} · 云端最近改动 ${collected.activity}`,
+          `云端 .dsh/results/${collected.taskId}: ${collected.files.length ? collected.files.join(', ') : '（还没有文件）'}`,
+          collected.results.length
+            ? `本地副本 ${collected.resultsDir} (${collected.results.join(', ')})`
+            : `本地没有新文件：${collected.resultsDir}`,
+          collected.running
+            ? 'workspace 锁仍由该任务持有：等 worker 结束后再 result 一次，锁才会释放。'
+            : collected.released
+              ? 'workspace 锁已释放。'
+              : 'workspace 锁不在本进程里（Host 重启过），push 前先确认云端状态。',
+          collected.questions ? `worker 有未决问题：见 ${collected.resultsDir}/questions.md，带上答案再用同一 task_id 跑一轮` : '',
+          idleMinutes ? `auto-stop in ${idleMinutes} min` : '',
+        ]
+          .filter(Boolean)
+          .join('\n')
+      }
+      if (action !== 'sync') throw new Error('Unknown action; use "sync", "status", "delegate", "start" or "result".')
       const machine = await resolveSandbox(args.sandbox, exec.signal)
       const result = await syncCloudWorker(ray, machine, projection, { signal: exec.signal })
       if (!result.synced) {

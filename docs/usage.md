@@ -186,6 +186,23 @@ dsh --version && bwrap --version
 
 委托回执里会带 `vm-h`（本次任务消耗的机器机时，按 `usage.vm_hours` 前后差值算）与可选的 `auto-stop in N min`。
 
+### 不等待：start / status / result
+
+`delegate` 会阻塞到 worker 结束（上限 900 s）。要让任务**活过本轮**——合上电脑、关掉页面也照样跑——用三件套：
+
+| 动作 | 作用 |
+| --- | --- |
+| `start` | 做完 1–4 步（含取锁、发 prompt）后立刻返回 `taskId`，不聚合 SSE。云端 worker 自己跑。 |
+| `status` + `task_id` | 只读探针：云端有没有 `dsh --profile headless` 在跑、`.dsh/results/<taskId>/` 有哪些文件、最近改动时间、workspace 锁归谁。不下载任何东西。 |
+| `result` + `task_id` | 把产物取回本地；**worker 已经不在跑**时释放 workspace 锁，并按自动停机策略安排关机。 |
+
+语义要点：
+
+- **锁跟着任务走。** `start` 取的 workspace 锁一直持有到 `result` 看到 worker 退出为止，期间 `rayrun_workspace push` 会被拒绝——否则 push 会把 worker 正在改的树覆盖掉。
+- **锁在进程内存里。** Host 重启后锁消失，`result` 会提示「锁不在本进程里」，`push` 前先自己确认云端状态。
+- **status 的判据是进程，不是文件。** worker 可能先写产物、再继续干活；只有进程没了才算这轮结束。
+- **`result` 可以提前调。** 拿到的是阶段性产物，锁不释放，可以再调一次。
+
 ## 自动停机（可选，默认关闭）
 
 ```yaml
@@ -272,7 +289,7 @@ API 地址优先级：页面保存的地址（`~/.rayrun/dsh.json`）→ 插件 
 | `rayrun_desktop` | 桌面 computer use：`screenshot` 截屏、`click` / `type` / `key` / `scroll` 操作、`probe` 探测 X11 工具 |
 | `rayrun_files` | 工作区 list / upload / download |
 | `rayrun_agent` | 把整段任务交给机器内 agent，流式等待结果 |
-| `rayrun_dsh` | 云上 DSH worker：`sync` 推送并校验图层，`status` 只读比对，`delegate` 委托整段任务 |
+| `rayrun_dsh` | 云上 DSH worker：`sync` 推送并校验图层，`status` 只读比对，`delegate` 委托整段任务；`start` + `result` 不等待地委托与收取 |
 | `rayrun_workspace` | 工作区同步：`push` 推送并校验 HEAD/摘要，`pull` 回传 diff 供本地审阅 |
 
 ## 桌面自动化（computer use）
