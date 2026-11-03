@@ -212,11 +212,17 @@ dsh --version && bwrap --version
     idle_stop_minutes: 15   # 默认 0 = 从不自动停
 ```
 
-开启后，`rayrun_exec` / `rayrun_agent` / `delegate` 成功结束后会排一个定时器：
+开启后，`rayrun_exec` / `rayrun_agent` / `delegate` / `start` 成功结束后会排一个定时器：
 
-- 到点时若该机器仍有任务持有 workspace 锁，则跳过；
+- 到点时先问机器**有没有 `dsh --profile headless` 在跑**：有就不停（这条判据在 guest 里，Host 重启、别的会话起的任务都算数）；
+- 再看本进程有没有任务持着该机器的 workspace 锁（`delegate` / `start` 的锁一直持有到收取）；
 - 若云端 workspace 有**未 pull 的改动**（HEAD 或 dirty 摘要与上次 push 不一致），也跳过并保持运行；
+- 探测本身失败（连不上机器、读不到 workspace 状态）时**按不停处理**，失败的探测不算空闲证据；
 - 只执行 `stop`，**永不自动 destroy**；新任务会取消未到点的定时器。
+
+被跳过的停机**会重新排期**（同一个 `idle_stop_minutes` 后再查一次），原因消失后自然停掉；连续 6 次都没停成会放弃并打一行日志，不会无限重试。
+
+`rayrun_sandbox inspect` 的 `idle:` 行显示最近一次判定（原因 + 时间），停在哪个判据上一眼能看出来。
 
 定时器在 Host 内存里，重启即失效（与任务目标、workspace 锁一致）。
 

@@ -26,8 +26,9 @@ import { applyUpdate, canAutoUpdate, fetchLatestVersion, isNewer } from './lib/u
 import { fileURLToPath } from 'node:url'
 import { exportProfileProjection, readCloudWorker, readPluginFiles, syncCloudWorker } from './lib/cloud-dsh.js'
 import { pullWorkspace, pushWorkspace, cloudWorkspaceRoot, readCloudState } from './lib/cloud-workspace.js'
-import { checkTask, collectTask, delegateTask, startTask } from './lib/delegate.js'
+import { checkTask, collectTask, delegateTask, hasRunningWorker, startTask } from './lib/delegate.js'
 import { DESKTOP_ACTIONS, buildDesktopCommand, decodeScreenshot, desktopFailure } from './lib/desktop.js'
+import { decideIdleStop, describeIdle } from './lib/idle-policy.js'
 import { isFinished, kindOf, readFrame, sseFrames } from './lib/sse.js'
 import { WorkspaceLocks } from './lib/workspace-lock.js'
 
@@ -282,6 +283,10 @@ export function apply(ctx, config) {
    * stopping there would hide work the user has not reviewed yet.
    */
   const idleStops = new Map()
+  /** What the last timer decided per machine, for `rayrun_sandbox inspect`. */
+  const idleDecisions = new Map()
+  /** Consecutive refused stops; a machine that never settles stops being retried. */
+  const idleAttempts = new Map()
 
   const cancelIdleStop = (machineId) => {
     const timer = idleStops.get(machineId)
@@ -291,32 +296,70 @@ export function apply(ctx, config) {
     }
   }
 
+  /**
+   * Decide, then stop only when every fact agrees. A refused stop is re-armed:
+   * the reason is usually temporary (the worker exits, the user pulls, the lock
+   * is released), and without a re-arm the machine would simply never stop
+   * again until the next tool call scheduled a timer.
+   */
   const stopWhenIdle = async (machine) => {
-    if (workspaceLocks.status(machine.id)) return 'busy'
+    const lock = workspaceLocks.status(machine.id)
+    const workerRunning = await hasRunningWorker({ ray, machineId: machine.id }).catch(() => null)
+    let drifted = false
+    let reachable = workerRunning !== null
     try {
       const root = await cloudWorkspaceRoot(ray, machine.id)
       const cloud = await readCloudState(ray, machine.id, root)
       const state = cloud.state
-      const drifted = state
-        ? cloud.head !== state.head || cloud.digest !== state.digest
-        : cloud.statusLines > 0
-      if (drifted) return 'unpulled-changes'
+      drifted = state ? cloud.head !== state.head || cloud.digest !== state.digest : cloud.statusLines > 0
+    } catch {
+      reachable = false
+    }
+    const decision = decideIdleStop({
+      minutes: settings.idleStopMinutes,
+      workerRunning: workerRunning === true,
+      lock,
+      drifted,
+      reachable,
+    })
+    idleDecisions.set(machine.id, { at: Date.now(), ...decision })
+    if (!decision.stop) return decision.reason
+    try {
       await ray.machineAction(machine.id, 'stop')
       return 'stopped'
     } catch {
-      return 'skipped'
+      idleDecisions.set(machine.id, { at: Date.now(), stop: false, reason: 'unknown' })
+      return 'unknown'
     }
+  }
+
+  const armIdleStop = (machine, delayMs) => {
+    const timer = setTimeout(() => {
+      idleStops.delete(machine.id)
+      void stopWhenIdle(machine).then((outcome) => {
+        if (outcome === 'stopped' || outcome === 'disabled') {
+          idleAttempts.delete(machine.id)
+          return
+        }
+        const attempts = (idleAttempts.get(machine.id) ?? 0) + 1
+        idleAttempts.set(machine.id, attempts)
+        if (attempts >= 6) {
+          idleAttempts.delete(machine.id)
+          console.warn(`[rayrun] idle stop gave up on ${machine.name ?? machine.id} after ${attempts} attempts (${outcome})`)
+          return
+        }
+        armIdleStop(machine, delayMs)
+      })
+    }, delayMs)
+    if (typeof timer.unref === 'function') timer.unref()
+    idleStops.set(machine.id, timer)
   }
 
   const scheduleIdleStop = (machine) => {
     if (!settings.idleStopMinutes) return null
     cancelIdleStop(machine.id)
-    const timer = setTimeout(() => {
-      idleStops.delete(machine.id)
-      void stopWhenIdle(machine)
-    }, settings.idleStopMinutes * 60_000)
-    if (typeof timer.unref === 'function') timer.unref()
-    idleStops.set(machine.id, timer)
+    idleAttempts.delete(machine.id)
+    armIdleStop(machine, settings.idleStopMinutes * 60_000)
     return settings.idleStopMinutes
   }
 
@@ -1254,6 +1297,7 @@ export function apply(ctx, config) {
           `spec: ${detail.cpu_cores} vCPU / ${detail.memory_mb} MB / ${detail.workspace_mb} MB workspace`,
           `ip: ${detail.ip ?? '-'}`,
           `desktop: ${detail.remote_desktop ? detail.desktop_url ?? `port ${detail.desktop_port} (${detail.desktop_reason})` : 'not enabled'}`,
+          `idle: ${describeIdle(idleDecisions.get(machine.id))}`,
           `created: ${detail.created_at ?? '-'}`,
         ].join('\n')
       }
