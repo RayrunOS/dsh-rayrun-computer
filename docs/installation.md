@@ -4,7 +4,7 @@
 
 安装分三步：**装包 → 启用 bundle → 连接 Rayrun**。三步都不需要改插件源码。
 
-> 验证基线：DSH Desktop `0.2.1-rc.5`、插件 `2.0.0`（2026-11-01）。
+> 验证基线：DSH Desktop `0.2.1-rc.5`、插件 `1.0.0`（2026-11-01）。
 > 插件本身没有 npm 运行时依赖，也没有构建步骤。
 
 ---
@@ -80,13 +80,13 @@ dsh plugin --profile desktop add /abs/path/to/dsh-rayrun-computer
 
 ```bash
 pnpm pack        # 或 npm pack
-# → dsh-rayrun-computer-2.0.0.tgz
+# → dsh-rayrun-computer-1.0.0.tgz
 ```
 
 然后在「添加插件」里填 tgz 的绝对路径，或：
 
 ```bash
-dsh plugin --profile web add /abs/path/dsh-rayrun-computer-2.0.0.tgz
+dsh plugin --profile web add /abs/path/dsh-rayrun-computer-1.0.0.tgz
 ```
 
 tarball 包含 `package.json` 的 `files` 列出的文件（外加 npm 始终会带的 `LICENSE`）：`index.js`、`client.js`、`lib/*.js`、`locale/*.json`、`cordis.patch.yml`、`icon.png`、`README.md`，足够 Host 与 Client 运行。
