@@ -8,10 +8,12 @@
 # Then no NPM_TOKEN exists anywhere: the npm CLI exchanges the GitHub OIDC
 # token for a short-lived publish token and attaches provenance by itself.
 #
-# The very first publish is the exception: npm only offers the trusted
-# publisher settings page after the package exists, so publish 1.0.0 once from
-# a workstation with `npm login && npm publish --access public`, then configure
-# the trusted publisher above. Every later release goes through this file.
+# The very first publish is the exception: npm only exposes trusted-publisher
+# settings for a package that already exists, so 1.0.0 uses a repository
+# secret. Create a granular npm token with read/write access to all packages
+# and 2FA bypass enabled, save it as NPM_TOKEN, publish the GitHub Release,
+# then add the trusted publisher above and delete the secret. While NPM_TOKEN
+# exists it takes precedence over OIDC.
 #
 # Release flow: bump "version" in package.json on main, tag vX.Y.Z on that
 # commit, publish a GitHub Release for the tag. A tag that does not match
@@ -114,7 +116,9 @@ jobs:
 
       - name: Publish
         if: github.event_name == 'release'
-        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }} # bootstrap only; delete once OIDC works
+        run: npm publish --provenance --access public
 
       - name: Verify the release
         if: github.event_name == 'release'
