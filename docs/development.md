@@ -75,6 +75,16 @@ node test/api-smoke.mjs <sandbox-id>
 
 **实现任何新端点、功能或 wiring 变更后，必须跑一次真实环境验证**，单测不够。
 
+## 架构图
+
+README 里的架构图是 PNG（微信、论坛这类不支持 mermaid 的地方也能显示），源码在同目录：
+
+```bash
+python docs/render-architecture.py   # docs/architecture.mmd + architecture.zh.mmd → PNG
+```
+
+改图时先改 `.mmd`（保持与 README 描述一致），再照它调 `render-architecture.py` 里的坐标，最后重新生成两张 PNG。需要 Pillow。
+
 ## 刷新 Client bundle
 
 Client 半区只在页面启动时加载。改完 `client.js`：

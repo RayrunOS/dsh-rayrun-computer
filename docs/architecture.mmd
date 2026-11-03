@@ -1,0 +1,9 @@
+flowchart LR
+  subgraph you["Your computer"]
+    page["DSH page<br/>sidebar · desktop · toggle"]
+    host["Plugin host<br/>same-origin RPC · tools"]
+    page <--> host
+  end
+  host -->|"HTTPS · token stays local"| api["Rayrun API<br/>api.rayrunos.com/v1"]
+  api --> vm["Cloud computer<br/>Linux · persistent workspace"]
+  page -.->|"noVNC over ingress"| vm

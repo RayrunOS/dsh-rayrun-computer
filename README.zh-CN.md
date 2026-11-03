@@ -28,17 +28,7 @@
 
 ## 架构
 
-```mermaid
-flowchart LR
-  subgraph you["你的电脑"]
-    page["DSH 页面<br/>侧边栏 · 桌面 · 切换"]
-    host["插件 Host<br/>同源 RPC · 工具"]
-    page <--> host
-  end
-  host -->|"HTTPS · Token 只留本地"| api["Rayrun API<br/>api.rayrunos.com/v1"]
-  api --> vm["云电脑<br/>Linux · 持久工作区"]
-  page -.->|"noVNC 走 ingress"| vm
-```
+![架构：本地是 DSH 页面与插件 Host，中间是 Rayrun API，右边是云电脑](docs/architecture.zh.png)
 
 ## 快速开始
 

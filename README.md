@@ -28,17 +28,7 @@ The rule is **local-first**. The cloud is a worker, not a second home: your chec
 
 ## How it fits together
 
-```mermaid
-flowchart LR
-  subgraph you["Your computer"]
-    page["DSH page<br/>sidebar · desktop · toggle"]
-    host["Plugin host<br/>same-origin RPC · tools"]
-    page <--> host
-  end
-  host -->|"HTTPS · token stays local"| api["Rayrun API<br/>api.rayrunos.com/v1"]
-  api --> vm["Cloud computer<br/>Linux · persistent workspace"]
-  page -.->|"noVNC over ingress"| vm
-```
+![Architecture: DSH page and plugin host on your computer, the Rayrun API, and the cloud computer](docs/architecture.png)
 
 ## Quick start
 
