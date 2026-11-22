@@ -114,6 +114,59 @@ Return shapes:
 
 `dsh.status.files` lists what exists in the cloud result directory; `dsh.result.files` lists what was downloaded into `results_dir`.
 
+### Runtime RPC
+
+A host that must keep a process alive inside the machine can declare platform runtimes (ADR-036) through the same route. Available from **`1.2.0`**.
+
+| Action | Input | Returns |
+| --- | --- | --- |
+| `runtime.put` | `sandbox`, `name`, `spec` | read-back `runtime`, `applied`, `restarted` |
+| `runtime.list` | `sandbox` | `runtimes` |
+| `runtime.get` | `sandbox`, `name` | `runtime` or `null` |
+| `runtime.start` / `runtime.stop` / `runtime.restart` | `sandbox`, `name` | read-back `runtime` |
+| `runtime.delete` | `sandbox`, `name` | `deleted: true` (idempotent) |
+
+`spec`: `argv` (required), `workdir`, `env`, `credentials`, `restart` (`no` / `on-failure` / `always`), `autostart`, `keep_alive`, `stop_signal` (`SIGTERM` / `SIGINT` / `SIGKILL`), `stop_timeout_seconds` (0–30).
+
+- `sandbox` must already exist and is never created or woken. `runtime.put` on a paused/stopped machine persists the spec and reports `applied: false`; actions return `sandbox_paused` (503) or `sandbox_not_running` (409).
+- `credentials` is a list of **binding names already attached to the sandbox**, never values. The adapter does not read or print the Rayrun token; credential values are injected by the platform only at sandbox boot, so a runtime restart does not refresh them.
+- `keep_alive: true` keeps the platform idle sweeper away. The plugin's own optional `idle_stop_minutes` is separate — disable it for a persistent bot host.
+- Old images (guestd < 0.6.0) return `guestd_outdated` on writes/actions. `runtime.list` and `runtime.get` still return persisted specs with `state: "unknown"` and `status_error: "guestd_outdated"`.
+- The platform runtimes API is not on the hosted production API as of 2026-11-22; a deployment without the route returns `runtimes_unavailable` (plain 404). Deploy the daemon and a guestd 0.6.0 image before relying on it.
+
+Return shapes:
+
+```json
+// runtime.put
+{ "ok": true, "sandbox": "box", "machine_id": "sb-…", "runtime": { … },
+  "applied": true, "restarted": false }
+
+// runtime.list
+{ "ok": true, "sandbox": "box", "machine_id": "sb-…", "runtimes": [ { … } ] }
+
+// runtime.get
+{ "ok": true, "sandbox": "box", "machine_id": "sb-…", "runtime": { … } }
+
+// runtime.start / stop / restart
+{ "ok": true, "sandbox": "box", "machine_id": "sb-…", "runtime": { … } }
+
+// runtime.delete
+{ "ok": true, "sandbox": "box", "machine_id": "sb-…", "name": "bot-host", "deleted": true }
+```
+
+`runtime.get.runtime` is `null` when the name is absent. A runtime view is the platform's spec + live state:
+
+```json
+{ "name": "bot-host",
+  "spec": { "name": "bot-host", "argv": ["…"], "workdir": "/workspace",
+            "env": { "MODE": "bot" }, "credentials": ["model-key"],
+            "restart": "always", "autostart": true, "keep_alive": true,
+            "stop_signal": "SIGTERM", "stop_timeout_seconds": 10 },
+  "state": "running", "pid": 1234, "restarts": 0 }
+```
+
+Runtime errors add `invalid_runtime_name`, `invalid_runtime_spec`, `runtime_not_found` and `runtimes_unavailable`, while `guestd_outdated`, `sandbox_not_running`, `sandbox_paused`, `invalid_request`, `resource_exhausted`, `runtime_sync_failed`, `service_unavailable`, `not_found` and `illegal_state` pass through from the platform.
+
 ## Configuration
 
 Bundle defaults live in `cordis.patch.yml`; override only what you need in your profile:

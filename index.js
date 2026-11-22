@@ -28,6 +28,7 @@ import { exportProfileProjection, readCloudWorker, readPluginFiles, syncCloudWor
 import { pullWorkspace, pushWorkspace, cloudWorkspaceRoot, readCloudState } from './lib/cloud-workspace.js'
 import { checkTask, collectTask, delegateTask, hasRunningWorker, startTask } from './lib/delegate.js'
 import { validateBrief } from './lib/context-pack.js'
+import { runtimeName, runtimeSpec } from './lib/runtimes.js'
 import { DESKTOP_ACTIONS, buildDesktopCommand, decodeScreenshot, desktopFailure } from './lib/desktop.js'
 import { decideIdleStop, describeIdle } from './lib/idle-policy.js'
 import { isFinished, kindOf, readFrame, sseFrames } from './lib/sse.js'
@@ -1063,6 +1064,41 @@ export function apply(ctx, config) {
   }
 
   /**
+   * Map the two runtime-specific failures the platform's generic client cannot
+   * distinguish: a plain 404 (no JSON error code) means the deployment has no
+   * runtimes route at all, while a JSON `not_found` on an action means the
+   * named runtime is gone. Everything else passes through unchanged.
+   */
+  const runtimeCall = async (fn, machine, name = null, kind = null) => {
+    try {
+      return await fn()
+    } catch (error) {
+      if (error instanceof RayrunError && error.code === 'http_404') {
+        throw new RayrunError(
+          404,
+          'runtimes_unavailable',
+          `This Rayrun deployment does not expose the runtimes API (${machine.name ?? machine.id}).`,
+        )
+      }
+      if (kind === 'action' && error instanceof RayrunError && error.code === 'not_found') {
+        throw new LocalError('runtime_not_found', `Runtime "${name}" does not exist on ${machine.name ?? machine.id}.`)
+      }
+      throw error
+    }
+  }
+
+  /** Runtime views as the platform returns them (spec + live state). */
+  const runtimeListOf = async (machine) => {
+    const result = await runtimeCall(() => ray.listRuntimes(machine.id), machine)
+    return Array.isArray(result?.runtimes) ? result.runtimes : []
+  }
+
+  const runtimeOf = async (machine, name) => {
+    const runtimes = await runtimeListOf(machine)
+    return runtimes.find((item) => item?.name === name) ?? null
+  }
+
+  /**
    * Resolve a caller-supplied local path the way the agent means it: relative to
    * the session working directory, not to the Host process directory.
    */
@@ -1303,6 +1339,80 @@ export function apply(ctx, config) {
                   files: collected.results,
                   released: collected.released,
                   questions: collected.questions,
+                })
+                return
+              }
+              case 'runtime.put': {
+                const name = runtimeName(body.name)
+                const spec = runtimeSpec(body.spec)
+                const machine = await dshMachine(body.sandbox)
+                const write = await runtimeCall(() => ray.putRuntime(machine.id, name, spec), machine)
+                const runtime = await runtimeOf(machine, name)
+                if (!runtime) {
+                  throw new LocalError(
+                    'runtime_not_found',
+                    `Runtime "${name}" was accepted but is not visible on ${machine.name ?? machine.id}.`,
+                  )
+                }
+                reply(res, 200, {
+                  ok: true,
+                  sandbox: machine.name ?? machine.id,
+                  machine_id: machine.id,
+                  runtime,
+                  applied: write?.applied === true,
+                  restarted: write?.restarted === true,
+                })
+                return
+              }
+              case 'runtime.list': {
+                const machine = await dshMachine(body.sandbox)
+                const runtimes = await runtimeListOf(machine)
+                reply(res, 200, {
+                  ok: true,
+                  sandbox: machine.name ?? machine.id,
+                  machine_id: machine.id,
+                  runtimes,
+                })
+                return
+              }
+              case 'runtime.get': {
+                const name = runtimeName(body.name)
+                const machine = await dshMachine(body.sandbox)
+                const runtime = await runtimeOf(machine, name)
+                reply(res, 200, {
+                  ok: true,
+                  sandbox: machine.name ?? machine.id,
+                  machine_id: machine.id,
+                  runtime,
+                })
+                return
+              }
+              case 'runtime.start':
+              case 'runtime.stop':
+              case 'runtime.restart': {
+                const verb = action.slice('runtime.'.length)
+                const name = runtimeName(body.name)
+                const machine = await dshMachine(body.sandbox)
+                await runtimeCall(() => ray.runtimeAction(machine.id, name, verb), machine, name, 'action')
+                const runtime = await runtimeOf(machine, name)
+                reply(res, 200, {
+                  ok: true,
+                  sandbox: machine.name ?? machine.id,
+                  machine_id: machine.id,
+                  runtime,
+                })
+                return
+              }
+              case 'runtime.delete': {
+                const name = runtimeName(body.name)
+                const machine = await dshMachine(body.sandbox)
+                await runtimeCall(() => ray.deleteRuntime(machine.id, name), machine)
+                reply(res, 200, {
+                  ok: true,
+                  sandbox: machine.name ?? machine.id,
+                  machine_id: machine.id,
+                  name,
+                  deleted: true,
                 })
                 return
               }

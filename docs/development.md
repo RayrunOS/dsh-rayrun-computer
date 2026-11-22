@@ -15,6 +15,7 @@
 | `lib/workspace-lock.js` | 单 writer 锁 |
 | `lib/context-pack.js` | handoff 目录的生成与 secret 拦截 |
 | `lib/delegate.js` | 委托：预备 / 发 prompt / 收取，以及云端 worker 进程探针 |
+| `lib/runtimes.js` | 平台常驻 runtime（ADR-036）的 spec 校验与 PUT body 构造 |
 | `lib/desktop.js` | 桌面 computer use：X11 命令构造、截图解码、失败映射 |
 | `lib/idle-policy.js` | 自动停机判定：worker 在跑 / 锁 / 未 pull 改动 / 探测失败 的优先级 |
 | `lib/sse.js` | SSE 解析 |
@@ -53,6 +54,7 @@ node test/cloud-tool.mjs        # 用假上下文驱动真实 apply，断言 ray
 node test/desktop.mjs           # rayrun_desktop：参数校验、X11 命令构造、截图解码、图片块渲染
 node test/async-delegate.mjs    # start/status/result：探针解析、产物取回、锁的释放时机
 node test/dsh-rpc.mjs           # dsh.start/status/result：同源、无 Token、不建机器、生命周期与结果收取
+node test/runtime-rpc.mjs       # runtime.put/list/get/start/stop/restart/delete：spec 转发、错误码、不建机器
 node test/idle-policy.mjs       # 自动停机判定矩阵与 worker 探针解析
 node test/security.mjs          # 负向：跨源 POST、超大 body、未知 action、只读响应不含 token
 node test/tool-routing.mjs      # 云上/本地工具路由

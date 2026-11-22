@@ -220,6 +220,24 @@ dsh --version && bwrap --version
 - 只接受同源 POST，响应不含 Token；错误统一为 `{ ok:false, error:{ code, message, status } }`。
 - 版本范围：`dsh-rayrun-computer >=1.1.0 <2.0.0`。
 
+### Host RPC：runtime.*
+
+同一路由还提供平台常驻进程（ADR-036）的 host 表面，版本范围 `dsh-rayrun-computer >=1.2.0 <2.0.0`：
+
+| 动作 | 输入 | 返回 |
+| --- | --- | --- |
+| `runtime.put` | `sandbox`、`name`、`spec` | 回读的 `runtime`、`applied`、`restarted` |
+| `runtime.list` | `sandbox` | `runtimes` |
+| `runtime.get` | `sandbox`、`name` | `runtime` 或 `null` |
+| `runtime.start` / `runtime.stop` / `runtime.restart` | `sandbox`、`name` | 回读的 `runtime` |
+| `runtime.delete` | `sandbox`、`name` | `deleted: true`（幂等） |
+
+- `spec`：`argv`（必填）、`workdir`、`env`、`credentials`、`restart`、`autostart`、`keep_alive`、`stop_signal`、`stop_timeout_seconds`。`credentials` 只传沙箱已绑定的凭证名，不传值。
+- `sandbox` 必须已存在；**不自动创建、不唤醒**。暂停/停止机器上 `runtime.put` 只持久化（`applied:false`）；动作返回 `sandbox_paused` / `sandbox_not_running`。
+- 旧镜像写操作/动作返回 `guestd_outdated`；`runtime.list` / `runtime.get` 仍返回 spec，`state=unknown` + `status_error`。
+- `keep_alive` 只影响平台 idle sweeper；插件自己的 `idle_stop_minutes` 是独立定时器，常驻 bot host 请设为 0。
+- 平台 runtimes API 截至 2026-11-22 未部署到生产；没有该路由的部署返回 `runtimes_unavailable`（普通 404）。完整 schema 见 [README 的 Runtime RPC](../README.zh-CN.md#runtime-rpc)。
+
 ## 自动停机（可选，默认关闭）
 
 ```yaml
