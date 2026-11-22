@@ -52,12 +52,12 @@ jobs:
       id-token: write # OIDC trusted publishing; no long-lived npm token
     steps:
       - name: Check out the release tag
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0 # main's history is needed for the ancestry check
 
       - name: Use Node.js 24
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: '24' # ships npm >= 11.5.1, required for trusted publishing
           registry-url: 'https://registry.npmjs.org'
