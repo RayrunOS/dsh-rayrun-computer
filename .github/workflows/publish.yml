@@ -17,7 +17,9 @@
 #
 # Release flow: bump "version" in package.json on main, tag vX.Y.Z on that
 # commit, publish a GitHub Release for the tag. A tag that does not match
-# package.json stops the job before it touches the registry.
+# package.json stops the job before it touches the registry. CI
+# (.github/workflows/ci.yml) runs first on Node 22 and 24; publishing waits for
+# it, so a red test never reaches npm.
 #
 # A manual run (workflow_dispatch) is a dry run: checks and `npm pack` only.
 
@@ -36,8 +38,13 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  ci:
+    name: CI
+    uses: ./.github/workflows/ci.yml
+
   publish:
     name: Publish to npm
+    needs: ci
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -72,27 +79,23 @@ jobs:
             exit 1
           fi
 
-      - name: Run the offline checks
-        run: |
-          for file in index.js client.js lib/auth.js lib/rayrun.js; do
-            node --check "$file"
-          done
-          node test/locale-audit.mjs
-
       - name: Inspect the tarball
         env:
           PACK_JSON: ${{ runner.temp }}/pack.json
         run: |
           npm pack --dry-run --json > "$PACK_JSON"
           node -e '
-          const { readFileSync } = require("node:fs")
+          const { readFileSync, readdirSync } = require("node:fs")
           // npm keys the report by package name in newer versions; older ones print an array.
           const parsed = JSON.parse(readFileSync(process.env.PACK_JSON, "utf8"))
           const pack = Array.isArray(parsed) ? parsed[0] : Object.values(parsed)[0]
           const files = new Set(pack.files.map((entry) => entry.path))
+          const libs = readdirSync("lib")
+            .filter((name) => name.endsWith(".js"))
+            .map((name) => `lib/${name}`)
           const required = [
             "package.json", "index.js", "client.js", "cordis.patch.yml",
-            "icon.png", "lib/update.js", "locale/en.json", "locale/zh.json",
+            "icon.png", "locale/en.json", "locale/zh.json", ...libs,
           ]
           const missing = required.filter((path) => !files.has(path))
           if (missing.length) {

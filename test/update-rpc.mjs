@@ -7,10 +7,13 @@
  *   node test/update-rpc.mjs missing  # the registry has no published version
  */
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { Readable } from 'node:stream'
 import { apply } from '../index.js'
 
 const NAME = 'dsh-rayrun-computer'
+// `update.current` is the running package version, not the fake installed bundle.
+const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version
 const scenario = process.argv[2] ?? 'available'
 const realFetch = globalThis.fetch
 
@@ -126,7 +129,7 @@ if (scenario === 'missing') {
     const handler = hostFor(manager())
     const reply = await request(handler, { action: 'update.check' })
     assert.equal(reply.ok, true)
-    assert.equal(reply.update.current, '2.0.0')
+    assert.equal(reply.update.current, VERSION)
     assert.equal(reply.update.latest, '9.9.9')
     assert.equal(reply.update.available, true)
     assert.equal(reply.update.canApply, true)
@@ -186,7 +189,7 @@ if (scenario === 'missing') {
     assert.deepEqual(fake.calls, [
       ['remove', NAME],
       ['install', `${NAME}@9.9.9`, { enabled: true, saveExact: true }],
-      ['install', `${NAME}@2.0.0`, { enabled: true, saveExact: true }],
+      ['install', `${NAME}@${VERSION}`, { enabled: true, saveExact: true }],
     ])
   })
 

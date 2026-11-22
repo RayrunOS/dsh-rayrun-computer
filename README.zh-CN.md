@@ -159,7 +159,7 @@ node test/desktop.mjs
 node test/dsh-rpc.mjs
 ```
 
-没有构建步骤，也没有运行时依赖；`client.js` 只用 DSH 提供的内建模块。完整的检查与测试清单见[开发与自测](docs/development.md)。
+没有构建步骤，也没有运行时依赖；`client.js` 只用 DSH 提供的内建模块。CI 在 Node 22 和 24 上跑同一套检查（`.github/workflows/ci.yml`），npm 发布必须等它通过。完整的检查与测试清单见[开发与自测](docs/development.md)。
 
 ## License
 

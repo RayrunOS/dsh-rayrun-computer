@@ -1,0 +1,65 @@
+# Continuous integration: syntax, locale audit, offline tests and packaging.
+#
+# Everything here is offline. `test/api-smoke.mjs` hits a real Rayrun machine
+# and is deliberately excluded; run it locally when credentials are available.
+# `publish.yml` calls this workflow and waits for it before touching npm.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  # Superseded PR/push runs are cancelled; a release's CI gate is never cancelled.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
+
+jobs:
+  check:
+    name: Check (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Use Node.js ${{ matrix.node }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Syntax-check the host, client and tests
+        run: |
+          for file in index.js client.js lib/*.js test/*.mjs; do
+            node --check "$file"
+          done
+
+      - name: Locale audit
+        run: node test/locale-audit.mjs
+
+      - name: Offline tests
+        run: |
+          for file in test/*.mjs; do
+            case "$file" in
+              test/api-smoke.mjs) continue ;; # live Rayrun API
+              test/locale-audit.mjs) continue ;; # already ran above
+            esac
+            echo "--- $file"
+            node "$file"
+          done
+          echo "--- test/update-rpc.mjs missing"
+          node test/update-rpc.mjs missing
+
+      - name: Pack the tarball
+        run: npm pack --dry-run

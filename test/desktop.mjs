@@ -11,6 +11,14 @@ import assert from 'node:assert/strict'
 import { DESKTOP_ACTIONS, buildDesktopCommand, decodeScreenshot, desktopFailure } from '../lib/desktop.js'
 import { apply } from '../index.js'
 
+// Keep the plugin's update check off the network.
+const NAME = 'dsh-rayrun-computer'
+const realFetch = globalThis.fetch
+globalThis.fetch = async (url, init) => {
+  if (String(url).includes(NAME)) return { ok: false, status: 404, json: async () => ({}) }
+  return realFetch(url, init)
+}
+
 const tools = []
 const store = { resolve: async () => undefined, set: async () => {}, unset: async () => {} }
 
@@ -174,4 +182,5 @@ for (const { name, fn } of checks) {
   }
 }
 console.log(`${checks.length - failed}/${checks.length} checks passed`)
+globalThis.fetch = realFetch
 if (failed) process.exitCode = 1

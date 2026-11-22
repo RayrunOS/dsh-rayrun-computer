@@ -76,6 +76,20 @@ node test/api-smoke.mjs <sandbox-id>
 
 **实现任何新端点、功能或 wiring 变更后，必须跑一次真实环境验证**，单测不够。
 
+## CI / CD
+
+GitHub Actions 有两个 workflow：
+
+| Workflow | 触发 | 做什么 |
+| --- | --- | --- |
+| `.github/workflows/ci.yml` | push 到 `main`、PR、手动 | Node 22/24 矩阵：`node --check`（Host、Client、`lib/*.js`、`test/*.mjs`）、locale 审计、全部离线测试（排除 `test/api-smoke.mjs`）、`npm pack --dry-run` |
+| `.github/workflows/publish.yml` | GitHub Release published、手动 | 先调用 `ci.yml`；通过后校验 tag 与 `package.json` 版本、提交在 `main` 上、tarball 包含全部 runtime 文件、registry 没有同版本，再 `npm publish --provenance` |
+
+- **发布**：在 `main` 上把 `package.json` 的 `version` bump 到目标版本 → 打 `vX.Y.Z` tag → 用该 tag 发布 GitHub Release。tag 与版本不一致、提交不在 `main`、或该版本已存在时，发布会被拒绝。
+- **首次发布**：npm 的 Trusted publishing 只能给已存在的包配置，所以第一次用仓库 secret `NPM_TOKEN` 发布；之后在 npm 包的 Settings → Trusted publishing 里填 organization `RayrunOS`、repository `dsh-rayrun-computer`、workflow `publish.yml`，再删除 `NPM_TOKEN`。之后由 GitHub OIDC 签发短期 token，仓库里不再有长期 npm 凭据。
+- **手动运行 `publish.yml`** 是 dry run：只跑检查和 `npm pack`，不发布。
+- CI 里的测试必须离线；`test/api-smoke.mjs` 会打真实 Rayrun API，只在本地手动执行。
+
 ## 架构图
 
 README 里的架构图是 PNG（微信、论坛这类不支持 mermaid 的地方也能显示），源码在同目录：

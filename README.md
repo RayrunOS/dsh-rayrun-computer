@@ -161,7 +161,7 @@ node test/desktop.mjs
 node test/dsh-rpc.mjs
 ```
 
-No build step and no runtime dependencies; `client.js` only loads modules DSH provides. Full check and test matrix: [docs/development.md](docs/development.md).
+No build step and no runtime dependencies; `client.js` only loads modules DSH provides. CI runs the same checks on Node 22 and 24 (`.github/workflows/ci.yml`), and npm publishing waits for it. Full check and test matrix: [docs/development.md](docs/development.md).
 
 ## License
 
