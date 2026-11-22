@@ -11,7 +11,15 @@ import { spawn } from 'node:child_process'
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { assertSafeRelative, diffDigest, diffFileCount, parsePorcelain, readLocalWorkspace } from '../lib/cloud-workspace.js'
+import {
+  assertSafeRelative,
+  diffDigest,
+  diffFileCount,
+  parsePorcelain,
+  readCloudState,
+  readLocalWorkspace,
+} from '../lib/cloud-workspace.js'
+import { EMPTY_DIGEST } from '../lib/workspace-lock.js'
 
 const checks = []
 const check = (name, fn) => checks.push({ name, fn })
@@ -45,6 +53,25 @@ check('digests and diff stats are stable', () => {
   assert.equal(diffDigest(patch), diffDigest(patch))
   assert.notEqual(diffDigest(patch), diffDigest(''))
   assert.equal(diffFileCount(patch.toString('utf8')), 2)
+})
+
+check('an empty cloud workspace has no head, not the next marker', async () => {
+  const ray = {
+    async exec() {
+      return {
+        // A fresh workspace prints nothing for `git rev-parse HEAD`, so the
+        // next marker follows immediately with no blank line.
+        stdout: `--head--\n--digest--\n${EMPTY_DIGEST}\n--status--\n0\n--state--\n`,
+        stderr: '',
+        exit_code: 0,
+      }
+    },
+  }
+  const state = await readCloudState(ray, 'sb-1', '/workspace')
+  assert.equal(state.head, null)
+  assert.equal(state.digest, EMPTY_DIGEST)
+  assert.equal(state.statusLines, 0)
+  assert.equal(state.state, null)
 })
 
 check('a dirty checkout round-trips through readLocalWorkspace', async () => {

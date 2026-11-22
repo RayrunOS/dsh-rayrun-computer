@@ -70,6 +70,50 @@ Machines come from [Rayrun](https://rayrunos.com/) and are billed by the second.
 | `rayrun_dsh` | `sync` the worker layer, `status` compare it, `delegate` a task and wait; `start` + `result` delegate without waiting |
 | `rayrun_workspace` | `push` a verified copy of your checkout, `pull` the cloud diff for review |
 
+## Host RPC (detached worker)
+
+A caller that outlives the page — a bot host, for example — can drive the same worker layer over the same-origin RPC route. These actions are available from **`1.1.0`** (accepted range `>=1.1.0 <2.0.0`). POST `/plugins/rayrun/rpc` with a JSON body:
+
+| Action | Input | Returns |
+| --- | --- | --- |
+| `dsh.start` | `sandbox`, `local_dir`, `objective`, `acceptance`; optional `context`, `constraints`, `decisions`, `open_questions`, `task_id`, `timeout` | immediately: `task_id` |
+| `dsh.status` | `sandbox`, `task_id` | `running`, `activity`, `files` |
+| `dsh.result` | `sandbox`, `task_id`, `local_dir` | `results_dir`, `files` |
+
+```json
+{ "action": "dsh.start", "sandbox": "box", "local_dir": "/abs/bot-workspace",
+  "objective": "…", "acceptance": ["…"], "context": "…", "task_id": "task-…", "timeout": 900 }
+```
+
+- `sandbox` is required and must already exist (name or id). A missing machine returns `sandbox_missing`; this surface never creates one. `dsh.start` starts or resumes a stopped/paused machine; `dsh.status` and `dsh.result` require it to be running.
+- `local_dir` is an absolute git checkout owned by the caller. `start` mirrors it to the machine and takes the workspace lock; `result` downloads into `<local_dir>/.dsh/results/<task_id>/` and releases the lock once the worker is gone.
+- `task_id` names the task; omit it to generate one. A task id this `local_dir` has not seen starts at round 1; an existing one advances to the next round.
+- `timeout` is seconds (default 900, max 3600).
+- POST only, same-origin checked like every action on this route. Responses never contain the Rayrun token.
+
+Return shapes:
+
+```json
+// dsh.start
+{ "ok": true, "task_id": "task-…", "sandbox": "box", "machine_id": "sb-…", "round": 1,
+  "prompt_id": "…", "started_at": "2026-11-22T…", "results_dir": "/abs/…/.dsh/results/task-…",
+  "revs": { "sessionSeq": null, "workspaceRev": "…", "profileRev": "…" }, "resynced": false }
+
+// dsh.status
+{ "ok": true, "task_id": "task-…", "sandbox": "box", "machine_id": "sb-…",
+  "running": true, "activity": "2026-11-22 10:00:00…", "files": ["decision.txt"],
+  "lock": { "key": "sb-…", "holder": "delegate task-…", "reason": "task-…", "since": 0, "expiresAt": 0 } }
+
+// dsh.result
+{ "ok": true, "task_id": "task-…", "sandbox": "box", "machine_id": "sb-…",
+  "running": false, "activity": "…", "results_dir": "/abs/…/.dsh/results/task-…",
+  "files": ["decision.txt"], "released": true, "questions": "" }
+```
+
+`status.lock` is `null` when this Host process holds no lock for the machine (for example after a Host restart). Failures use the route's usual shape: `{ "ok": false, "error": { "code", "message", "status" } }`. Stable codes include `origin_mismatch`, `token_required`, `sandbox_required`, `sandbox_missing`, `local_dir_required`, `local_dir_not_absolute`, `local_dir_missing`, `brief_incomplete`, `invalid_timeout`, `invalid_task_id`, `workspace_locked`, `workspace_drift`, `workspace_not_mirrored` and `projection_not_applied`.
+
+`dsh.status.files` lists what exists in the cloud result directory; `dsh.result.files` lists what was downloaded into `results_dir`.
+
 ## Configuration
 
 Bundle defaults live in `cordis.patch.yml`; override only what you need in your profile:
@@ -114,6 +158,7 @@ node --check client.js
 node test/security.mjs
 node test/tool-routing.mjs
 node test/desktop.mjs
+node test/dsh-rpc.mjs
 ```
 
 No build step and no runtime dependencies; `client.js` only loads modules DSH provides. Full check and test matrix: [docs/development.md](docs/development.md).

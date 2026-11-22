@@ -2,7 +2,7 @@
  * Host half of the Rayrun 云电脑 bundle.
  *
  * Two surfaces share one Rayrun client:
- *  - the 云电脑 page, through a same-origin `/plugins/rayrun/rpc` route;
+ *  - the 云电脑 page and host callers, through a same-origin `/plugins/rayrun/rpc` route;
  *  - seven model-facing tools that create/execute on the same cloud machines.
  *
  * The Rest client and connection resolution live in ./lib/rayrun.js.
@@ -10,7 +10,7 @@
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import {
@@ -27,6 +27,7 @@ import { fileURLToPath } from 'node:url'
 import { exportProfileProjection, readCloudWorker, readPluginFiles, syncCloudWorker } from './lib/cloud-dsh.js'
 import { pullWorkspace, pushWorkspace, cloudWorkspaceRoot, readCloudState } from './lib/cloud-workspace.js'
 import { checkTask, collectTask, delegateTask, hasRunningWorker, startTask } from './lib/delegate.js'
+import { validateBrief } from './lib/context-pack.js'
 import { DESKTOP_ACTIONS, buildDesktopCommand, decodeScreenshot, desktopFailure } from './lib/desktop.js'
 import { decideIdleStop, describeIdle } from './lib/idle-policy.js'
 import { isFinished, kindOf, readFrame, sseFrames } from './lib/sse.js'
@@ -1007,6 +1008,61 @@ export function apply(ctx, config) {
   }
 
   /**
+   * The host-callable detached surface has no session to infer a directory from
+   * and no default machine. A caller must name both, and a missing machine is an
+   * error, never a create.
+   */
+  const dshMachine = async (ref) => {
+    const wanted = String(ref ?? '').trim()
+    if (!wanted) {
+      throw new LocalError('sandbox_required', '`sandbox` is required for dsh.* actions; this surface never creates or defaults a machine.')
+    }
+    return resolveExisting(wanted)
+  }
+
+  /** Accept only an absolute path that is already a directory. */
+  const dshLocalDir = async (value) => {
+    const text = String(value ?? '').trim()
+    if (!text) {
+      throw new LocalError('local_dir_required', '`local_dir` is required and must be an absolute path.')
+    }
+    if (!path.isAbsolute(text)) {
+      throw new LocalError('local_dir_not_absolute', `\`local_dir\` must be absolute: ${JSON.stringify(text)}.`)
+    }
+    const dir = path.resolve(text)
+    try {
+      if ((await stat(dir)).isDirectory()) return dir
+    } catch {
+      // report the same code whether it is missing or unreadable
+    }
+    throw new LocalError('local_dir_missing', `\`local_dir\` is not a readable directory: ${dir}.`)
+  }
+
+  const dshBrief = (body) => {
+    const brief = {
+      objective: body.objective,
+      acceptance: body.acceptance,
+      constraints: body.constraints,
+      decisions: body.decisions,
+      openQuestions: body.open_questions,
+    }
+    const check = validateBrief(brief)
+    if (!check.ok) {
+      throw new LocalError('brief_incomplete', `objective and acceptance are required (missing: ${check.missing.join(', ')}).`)
+    }
+    return brief
+  }
+
+  /** Seconds, defaulting to the tool default and capped like the tool. */
+  const dshTimeout = (value) => {
+    const seconds = Number(pick(value, 900))
+    if (!Number.isFinite(seconds) || seconds <= 0) {
+      throw new LocalError('invalid_timeout', '`timeout` must be a positive number of seconds.')
+    }
+    return Math.max(1, Math.min(Math.round(seconds), 3600))
+  }
+
+  /**
    * Resolve a caller-supplied local path the way the agent means it: relative to
    * the session working directory, not to the Host process directory.
    */
@@ -1180,6 +1236,74 @@ export function apply(ctx, config) {
               case 'machine.desktopRepair': {
                 const result = await ray.repairDesktop(String(body.id ?? ''))
                 reply(res, 200, { ok: true, result })
+                return
+              }
+              case 'dsh.start': {
+                // Validate everything cheap first: a bad call must not wake or
+                // push to a machine.
+                const localDir = await dshLocalDir(body.local_dir)
+                const brief = dshBrief(body)
+                const timeoutSeconds = dshTimeout(body.timeout)
+                const machine = await dshMachine(body.sandbox)
+                cancelIdleStop(machine.id)
+                const running = await ray.wake(machine)
+                const started = await startTask({
+                  ray,
+                  machine: running,
+                  localDir,
+                  brief,
+                  notes: body.context,
+                  taskId: body.task_id,
+                  timeoutMs: timeoutSeconds * 1000,
+                  locks: workspaceLocks,
+                  project: projectWorker,
+                })
+                reply(res, 200, {
+                  ok: true,
+                  task_id: started.taskId,
+                  sandbox: started.machine,
+                  machine_id: running.id,
+                  round: started.round,
+                  prompt_id: started.promptId,
+                  started_at: started.startedAt,
+                  results_dir: started.resultsDir,
+                  revs: started.revs,
+                  resynced: started.resynced,
+                })
+                return
+              }
+              case 'dsh.status': {
+                const machine = await dshMachine(body.sandbox)
+                const state = await checkTask({ ray, machine, taskId: body.task_id, locks: workspaceLocks })
+                reply(res, 200, {
+                  ok: true,
+                  task_id: state.taskId,
+                  sandbox: state.machine,
+                  machine_id: machine.id,
+                  running: state.running,
+                  activity: state.activity,
+                  files: state.files,
+                  lock: state.lock,
+                })
+                return
+              }
+              case 'dsh.result': {
+                const localDir = await dshLocalDir(body.local_dir)
+                const machine = await dshMachine(body.sandbox)
+                const collected = await collectTask({ ray, machine, localDir, taskId: body.task_id, locks: workspaceLocks })
+                if (!collected.running) scheduleIdleStop(machine)
+                reply(res, 200, {
+                  ok: true,
+                  task_id: collected.taskId,
+                  sandbox: collected.machine,
+                  machine_id: machine.id,
+                  running: collected.running,
+                  activity: collected.activity,
+                  results_dir: collected.resultsDir,
+                  files: collected.results,
+                  released: collected.released,
+                  questions: collected.questions,
+                })
                 return
               }
               case 'update.check': {

@@ -203,6 +203,23 @@ dsh --version && bwrap --version
 - **status 的判据是进程，不是文件。** worker 可能先写产物、再继续干活；只有进程没了才算这轮结束。
 - **`result` 可以提前调。** 拿到的是阶段性产物，锁不释放，可以再调一次。
 
+### Host RPC：dsh.start / dsh.status / dsh.result
+
+同一个 `/plugins/rayrun/rpc` 路由还给 host 侧调用方（例如 bot host）提供三个动作，语义与上面的 `start` / `status` / `result` 相同。区别是没有 agent session 可以推断目录，也不接受默认机器：
+
+| 动作 | 输入 | 返回 |
+| --- | --- | --- |
+| `dsh.start` | `sandbox`、`local_dir`、`objective`、`acceptance`；可选 `context`、`task_id`、`timeout` | 立即返回 `task_id`（不聚合 SSE） |
+| `dsh.status` | `sandbox`、`task_id` | `running`、`activity`、`files`、`lock` |
+| `dsh.result` | `sandbox`、`task_id`、`local_dir` | `results_dir`、`files`（已下载）、`released`、`questions` |
+
+- `sandbox` 必填，只接受已存在的机器名或 id；不存在返回 `sandbox_missing`，**绝不自动创建**。`dsh.start` 会启动或恢复已停止/暂停的机器；`dsh.status` / `dsh.result` 要求机器正在运行。
+- `local_dir` 必须是绝对路径的 git checkout；`dsh.result` 收取到 `<local_dir>/.dsh/results/<task_id>/`。
+- `task_id` 用来命名任务；省略时自动生成。该 `local_dir` 从未见过的 id 从第 1 轮开始，已有任务则进入下一轮。
+- `timeout` 单位是秒，默认 900，上限 3600。
+- 只接受同源 POST，响应不含 Token；错误统一为 `{ ok:false, error:{ code, message, status } }`。
+- 版本范围：`dsh-rayrun-computer >=1.1.0 <2.0.0`。
+
 ## 自动停机（可选，默认关闭）
 
 ```yaml
@@ -318,7 +335,7 @@ API 地址优先级：页面保存的地址（`~/.rayrun/dsh.json`）→ 插件 
 ## 安全与边界
 
 - Token 只存在 Host 侧。页面通过 `/plugins/rayrun/rpc` 调用，接口不返回 Token，只返回来源与是否配置。
-- RPC 只接受同源 POST（校验 `Origin`），并限制请求体大小。
+- RPC 只接受同源 POST（校验 `Origin`），并限制请求体大小；`dsh.*` 同样不返回 Token。
 - 密码只存在内存；Token 只进 Harness 凭证库，或来自你显式设置的 `RAYRUN_TOKEN` / `~/.rayrun/token`。
 - Token 文件、`~/.rayrun/dsh.json` 均为用户本机文件；发布包不包含任何 Token。
 - 销毁不可恢复：机器和工作区数据一起删除。

@@ -70,6 +70,50 @@ git clone https://github.com/RayrunOS/dsh-rayrun-computer.git
 | `rayrun_dsh` | `sync` 推送并校验 worker 图层，`status` 只读比对，`delegate` 委托任务；`start` + `result` 不等待地委托与收取 |
 | `rayrun_workspace` | `push` 推送并校验 checkout，`pull` 回传云端 diff 供审阅 |
 
+## Host RPC（页面关闭后继续）
+
+页面之外的调用方（例如 bot host）可以通过同源 RPC 直接驱动同一套 worker 层。以下动作从 **`1.1.0`** 起可用（版本范围 `>=1.1.0 <2.0.0`）。向 `/plugins/rayrun/rpc` POST JSON：
+
+| 动作 | 输入 | 返回 |
+| --- | --- | --- |
+| `dsh.start` | `sandbox`、`local_dir`、`objective`、`acceptance`；可选 `context`、`constraints`、`decisions`、`open_questions`、`task_id`、`timeout` | 立即返回 `task_id` |
+| `dsh.status` | `sandbox`、`task_id` | `running`、`activity`、`files` |
+| `dsh.result` | `sandbox`、`task_id`、`local_dir` | `results_dir`、`files` |
+
+```json
+{ "action": "dsh.start", "sandbox": "box", "local_dir": "/abs/bot-workspace",
+  "objective": "…", "acceptance": ["…"], "context": "…", "task_id": "task-…", "timeout": 900 }
+```
+
+- `sandbox` 必填，且必须是已存在的机器名或 id。不存在返回 `sandbox_missing`，这个表面**绝不自动建机器**；`dsh.start` 会启动或恢复已停止/暂停的机器，`dsh.status` / `dsh.result` 要求机器正在运行。
+- `local_dir` 必填，是调用方自己的绝对路径 git workspace。`start` 会镜像它到机器并持有 workspace 锁；`result` 收取到 `<local_dir>/.dsh/results/<task_id>/`，worker 退出后释放锁。
+- `task_id` 用来命名任务；省略时自动生成。该 `local_dir` 从未见过的 id 从第 1 轮开始，已有任务则进入下一轮。
+- `timeout` 单位是秒（默认 900，上限 3600）。
+- 只接受同源 POST（与路由上其他动作一致）；响应不含 Rayrun Token。
+
+返回形状：
+
+```json
+// dsh.start
+{ "ok": true, "task_id": "task-…", "sandbox": "box", "machine_id": "sb-…", "round": 1,
+  "prompt_id": "…", "started_at": "2026-11-22T…", "results_dir": "/abs/…/.dsh/results/task-…",
+  "revs": { "sessionSeq": null, "workspaceRev": "…", "profileRev": "…" }, "resynced": false }
+
+// dsh.status
+{ "ok": true, "task_id": "task-…", "sandbox": "box", "machine_id": "sb-…",
+  "running": true, "activity": "2026-11-22 10:00:00…", "files": ["decision.txt"],
+  "lock": { "key": "sb-…", "holder": "delegate task-…", "reason": "task-…", "since": 0, "expiresAt": 0 } }
+
+// dsh.result
+{ "ok": true, "task_id": "task-…", "sandbox": "box", "machine_id": "sb-…",
+  "running": false, "activity": "…", "results_dir": "/abs/…/.dsh/results/task-…",
+  "files": ["decision.txt"], "released": true, "questions": "" }
+```
+
+`status.lock` 在本进程没有持有该机器的锁时为 `null`（例如 Host 重启后）。失败沿用路由的统一形状：`{ "ok": false, "error": { "code", "message", "status" } }`。稳定错误码包括 `origin_mismatch`、`token_required`、`sandbox_required`、`sandbox_missing`、`local_dir_required`、`local_dir_not_absolute`、`local_dir_missing`、`brief_incomplete`、`invalid_timeout`、`invalid_task_id`、`workspace_locked`、`workspace_drift`、`workspace_not_mirrored` 和 `projection_not_applied`。
+
+`dsh.status.files` 是云端结果目录里的文件；`dsh.result.files` 是已经收取到 `results_dir` 的文件。
+
 ## 配置
 
 bundle 的默认值在 `cordis.patch.yml`；只覆盖你要改的键：
@@ -112,6 +156,7 @@ node --check client.js
 node test/security.mjs
 node test/tool-routing.mjs
 node test/desktop.mjs
+node test/dsh-rpc.mjs
 ```
 
 没有构建步骤，也没有运行时依赖；`client.js` 只用 DSH 提供的内建模块。完整的检查与测试清单见[开发与自测](docs/development.md)。
