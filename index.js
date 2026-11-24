@@ -1283,28 +1283,17 @@ export function apply(ctx, config) {
                 const machine = await dshMachine(body.sandbox)
                 cancelIdleStop(machine.id)
                 const running = await ray.wake(machine)
-                let started
-                try {
-                  started = await startTask({
-                    ray,
-                    machine: running,
-                    localDir,
-                    brief,
-                    notes: body.context,
-                    taskId: body.task_id,
-                    timeoutMs: timeoutSeconds * 1000,
-                    locks: workspaceLocks,
-                    project: projectWorker,
-                  })
-                } catch (error) {
-                  if (error instanceof RayrunError && error.code === 'http_404') {
-                    throw new LocalError(
-                      'worker_files_unavailable',
-                      'The machine file API rejected the worker profile write; the sandbox may still be starting. Retry dsh.start after a short delay.',
-                    )
-                  }
-                  throw error
-                }
+                const started = await startTask({
+                  ray,
+                  machine: running,
+                  localDir,
+                  brief,
+                  notes: body.context,
+                  taskId: body.task_id,
+                  timeoutMs: timeoutSeconds * 1000,
+                  locks: workspaceLocks,
+                  project: projectWorker,
+                })
                 reply(res, 200, {
                   ok: true,
                   task_id: started.taskId,

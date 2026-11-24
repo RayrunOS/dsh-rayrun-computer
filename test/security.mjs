@@ -27,7 +27,7 @@ const config = {
 
 // Keep the plugin's update check off the network.
 globalThis.fetch = async (url, init) => {
-  if (String(url).includes(NAME)) return { ok: false, status: 404, json: async () => ({}) }
+  if (String(url).includes(`${NAME}/latest`)) return { ok: false, status: 404, json: async () => ({}) }
   return realFetch(url, init)
 }
 

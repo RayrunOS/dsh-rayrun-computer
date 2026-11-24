@@ -18,7 +18,7 @@ const scenario = process.argv[2] ?? 'available'
 const realFetch = globalThis.fetch
 
 globalThis.fetch = async (url) => {
-  if (!String(url).includes(NAME)) return realFetch(url)
+  if (!String(url).includes(`${NAME}/latest`)) return realFetch(url)
   if (scenario === 'missing') return { ok: false, status: 404, json: async () => ({}) }
   return { ok: true, status: 200, json: async () => ({ version: '9.9.9' }) }
 }

@@ -215,7 +215,6 @@ dsh --version && bwrap --version
 
 - `sandbox` 必填，只接受已存在的机器名或 id；不存在返回 `sandbox_missing`，**绝不自动创建**。`dsh.start` 会启动或恢复已停止/暂停的机器；`dsh.status` / `dsh.result` 要求机器正在运行。
 - 镜像的 oneshot `[run].argv` 必须真正启动 DSH headless（如 `deepseek-harness@1`）；`/bin/sh -c` 镜像（如 `dsh-bot@1` / `dsh-bot-devcheck@1`）会把 delegation prompt 当 shell 命令执行，不会产生 DSH turn。
-- 机器刚启动时，file API 可能对首次 worker profile 写入返回普通 404；`dsh.start` 返回 `worker_files_unavailable`。用 backoff 重试整个调用；file API 可能比 exec API 滞后数十秒。
 - `local_dir` 必须是绝对路径的 git checkout；`dsh.result` 收取到 `<local_dir>/.dsh/results/<task_id>/`。
 - `task_id` 用来命名任务；省略时自动生成。该 `local_dir` 从未见过的 id 从第 1 轮开始，已有任务则进入下一轮。
 - `timeout` 单位是秒，默认 900，上限 3600。

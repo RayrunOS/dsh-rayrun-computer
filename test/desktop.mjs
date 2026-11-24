@@ -15,7 +15,7 @@ import { apply } from '../index.js'
 const NAME = 'dsh-rayrun-computer'
 const realFetch = globalThis.fetch
 globalThis.fetch = async (url, init) => {
-  if (String(url).includes(NAME)) return { ok: false, status: 404, json: async () => ({}) }
+  if (String(url).includes(`${NAME}/latest`)) return { ok: false, status: 404, json: async () => ({}) }
   return realFetch(url, init)
 }
 
