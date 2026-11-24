@@ -87,6 +87,7 @@ A caller that outlives the page — a bot host, for example — can drive the sa
 
 - `sandbox` is required and must already exist (name or id). A missing machine returns `sandbox_missing`; this surface never creates one. `dsh.start` starts or resumes a stopped/paused machine; `dsh.status` and `dsh.result` require it to be running.
 - `dsh.start` needs an agent image whose oneshot `[run].argv` launches DSH headless (for example `deepseek-harness@1`). An image whose argv is `/bin/sh -c` (such as the runtime-test images `dsh-bot@1` / `dsh-bot-devcheck@1`) executes the delegation prompt as a shell command, not a DSH turn.
+- On a just-started sandbox, the machine file API can reject the first worker-profile write with a plain 404; `dsh.start` reports `worker_files_unavailable`. Retry the whole call with backoff: the file API can lag the exec API by tens of seconds.
 - `local_dir` is an absolute git checkout owned by the caller. `start` mirrors it to the machine and takes the workspace lock; `result` downloads into `<local_dir>/.dsh/results/<task_id>/` and releases the lock once the worker is gone.
 - `task_id` names the task; omit it to generate one. A task id this `local_dir` has not seen starts at round 1; an existing one advances to the next round.
 - `timeout` is seconds (default 900, max 3600).
@@ -111,7 +112,7 @@ Return shapes:
   "files": ["decision.txt"], "released": true, "questions": "" }
 ```
 
-`status.lock` is `null` when this Host process holds no lock for the machine (for example after a Host restart). Failures use the route's usual shape: `{ "ok": false, "error": { "code", "message", "status" } }`. Stable codes include `origin_mismatch`, `token_required`, `sandbox_required`, `sandbox_missing`, `local_dir_required`, `local_dir_not_absolute`, `local_dir_missing`, `brief_incomplete`, `invalid_timeout`, `invalid_task_id`, `workspace_locked`, `workspace_drift`, `workspace_not_mirrored` and `projection_not_applied`.
+`status.lock` is `null` when this Host process holds no lock for the machine (for example after a Host restart). Failures use the route's usual shape: `{ "ok": false, "error": { "code", "message", "status" } }`. Stable codes include `origin_mismatch`, `token_required`, `sandbox_required`, `sandbox_missing`, `local_dir_required`, `local_dir_not_absolute`, `local_dir_missing`, `brief_incomplete`, `invalid_timeout`, `invalid_task_id`, `worker_files_unavailable`, `workspace_locked`, `workspace_drift`, `workspace_not_mirrored` and `projection_not_applied`.
 
 `dsh.status.files` lists what exists in the cloud result directory; `dsh.result.files` lists what was downloaded into `results_dir`.
 
