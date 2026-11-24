@@ -86,6 +86,7 @@ A caller that outlives the page — a bot host, for example — can drive the sa
 ```
 
 - `sandbox` is required and must already exist (name or id). A missing machine returns `sandbox_missing`; this surface never creates one. `dsh.start` starts or resumes a stopped/paused machine; `dsh.status` and `dsh.result` require it to be running.
+- `dsh.start` needs an agent image whose oneshot `[run].argv` launches DSH headless (for example `deepseek-harness@1`). An image whose argv is `/bin/sh -c` (such as the runtime-test images `dsh-bot@1` / `dsh-bot-devcheck@1`) executes the delegation prompt as a shell command, not a DSH turn.
 - `local_dir` is an absolute git checkout owned by the caller. `start` mirrors it to the machine and takes the workspace lock; `result` downloads into `<local_dir>/.dsh/results/<task_id>/` and releases the lock once the worker is gone.
 - `task_id` names the task; omit it to generate one. A task id this `local_dir` has not seen starts at round 1; an existing one advances to the next round.
 - `timeout` is seconds (default 900, max 3600).

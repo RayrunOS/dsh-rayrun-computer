@@ -91,6 +91,14 @@ check('the delegation prompt names the round directory and the expected revs', (
   assert.match(prompt, /\.dsh\/results\/task-9\/questions\.md/)
 })
 
+check('a known workspace root turns the prompt paths absolute', () => {
+  const prompt = delegationPrompt({ taskId: 'task-9', round: 3, revs, root: '/workspace/' })
+  assert.match(prompt, /工作区根目录是 `\/workspace`/)
+  assert.match(prompt, /`\/workspace\/\.dsh\/handoff\/task-9\/round-3\/handoff\.md`/)
+  assert.match(prompt, /`\/workspace\/\.dsh\/results\/task-9\/`/)
+  assert.ok(!prompt.includes('/workspace//'), 'trailing slashes are normalized')
+})
+
 check('rev echo detection needs all three values', () => {
   const good = `REVS sessionSeq=42 workspaceRev=${revs.workspaceRev} profileRev=${revs.profileRev}`
   assert.equal(revsEchoed(good, revs), true)
