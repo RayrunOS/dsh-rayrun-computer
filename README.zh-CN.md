@@ -131,6 +131,7 @@ git clone https://github.com/RayrunOS/dsh-rayrun-computer.git
 
 - `sandbox` 必须已存在，**绝不创建或唤醒**。对暂停/停止的机器 `runtime.put` 只持久化 spec，返回 `applied: false`；动作返回 `sandbox_paused`（503）或 `sandbox_not_running`（409）。
 - `credentials` 只接受**沙箱创建时已绑定的凭证名**，不接受值；adapter 不读取、不打印 Rayrun Token。凭证值只在沙箱 boot 时由平台注入，runtime restart 不会刷新。
+- 机器已绑定的凭证名可以从 `overview`（`machines[]`）和 `machine.get` 的 `machine.credentials` 读取；runtime spec 没有显式 `credentials` 时以此为准。
 - `keep_alive: true` 让平台 idle sweeper 跳过该机器；插件自己的 `idle_stop_minutes` 是独立定时器，常驻 bot host 请关闭它。
 - 旧镜像（guestd < 0.6.0）的写操作/动作返回 `guestd_outdated`；`runtime.list` / `runtime.get` 仍返回已持久化的 spec，`state` 为 `unknown`、`status_error` 为 `guestd_outdated`。
 - 截至 2026-11-22，平台 runtimes API 尚未部署到托管生产 API；没有该路由的部署会返回 `runtimes_unavailable`（普通 404）。依赖前需部署新 daemon 和 guestd 0.6.0 镜像。

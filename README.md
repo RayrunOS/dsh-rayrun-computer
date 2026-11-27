@@ -131,6 +131,7 @@ A host that must keep a process alive inside the machine can declare platform ru
 
 - `sandbox` must already exist and is never created or woken. `runtime.put` on a paused/stopped machine persists the spec and reports `applied: false`; actions return `sandbox_paused` (503) or `sandbox_not_running` (409).
 - `credentials` is a list of **binding names already attached to the sandbox**, never values. The adapter does not read or print the Rayrun token; credential values are injected by the platform only at sandbox boot, so a runtime restart does not refresh them.
+- The binding names attached to a machine are returned by `overview` (each `machines[]` entry) and `machine.get` as `machine.credentials`; a runtime spec without explicit `credentials` should use these names.
 - `keep_alive: true` keeps the platform idle sweeper away. The plugin's own optional `idle_stop_minutes` is separate — disable it for a persistent bot host.
 - Old images (guestd < 0.6.0) return `guestd_outdated` on writes/actions. `runtime.list` and `runtime.get` still return persisted specs with `state: "unknown"` and `status_error: "guestd_outdated"`.
 - The platform runtimes API is not on the hosted production API as of 2026-11-22; a deployment without the route returns `runtimes_unavailable` (plain 404). Deploy the daemon and a guestd 0.6.0 image before relying on it.

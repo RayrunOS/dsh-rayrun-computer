@@ -35,6 +35,7 @@ const machine = (id, name, status) => ({
   memory_mb: 2048,
   workspace_mb: 10240,
   remote_desktop: false,
+  credentials: ['machine-model-key'],
 })
 
 /** The fake platform state. */
@@ -319,6 +320,19 @@ try {
     assert.equal(reply.json.error.code, 'sandbox_missing')
     assert.equal(cloud.requests.slice(before).filter((item) => item.path.includes('/runtimes')).length, 0)
     assert.equal(cloud.requests.filter((item) => item.method === 'POST' && item.path === '/v1/sandboxes').length, 0)
+  })
+
+  check('overview and machine.get expose the machine-bound credential names', async () => {
+    const detail = await rpc(host, { action: 'machine.get', id: 'sb-test-0001' })
+    assert.equal(detail.json.ok, true)
+    assert.deepEqual(detail.json.machine.credentials, ['machine-model-key'])
+    assert.doesNotMatch(detail.text, /test-token|Bearer/)
+
+    const overview = await rpc(host, { action: 'overview' })
+    assert.equal(overview.json.ok, true)
+    const listed = overview.json.machines.find((item) => item.id === 'sb-test-0001')
+    assert.ok(listed, 'the sandbox appears in overview')
+    assert.deepEqual(listed.credentials, ['machine-model-key'])
   })
 
   check('names and specs are validated before the API is touched', async () => {

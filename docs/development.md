@@ -55,6 +55,7 @@ node test/desktop.mjs           # rayrun_desktop：参数校验、X11 命令构�
 node test/async-delegate.mjs    # start/status/result：探针解析、产物取回、锁的释放时机
 node test/dsh-rpc.mjs           # dsh.start/status/result：同源、无 Token、不建机器、生命周期与结果收取
 node test/runtime-rpc.mjs       # runtime.put/list/get/start/stop/restart/delete：spec 转发、错误码、不建机器
+node test/machine-shape.mjs     # shapeSandbox 保留机器已绑定的凭证名（runtime 未显式传 credentials 时的来源）
 node test/idle-policy.mjs       # 自动停机判定矩阵与 worker 探针解析
 node test/security.mjs          # 负向：跨源 POST、超大 body、未知 action、只读响应不含 token
 node test/tool-routing.mjs      # 云上/本地工具路由
