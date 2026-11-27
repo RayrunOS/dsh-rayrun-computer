@@ -126,12 +126,15 @@ jobs:
       - name: Verify the release
         if: github.event_name == 'release'
         run: |
-          for attempt in 1 2 3 4 5; do
+          # npm processes a new publish before it appears in the packument;
+          # the notice says "a few minutes", so wait longer than a few seconds.
+          for attempt in $(seq 1 30); do
             if npm view "dsh-rayrun-computer@$VERSION" version > /dev/null 2>&1; then
               echo "published dsh-rayrun-computer@$VERSION" >> "$GITHUB_STEP_SUMMARY"
               exit 0
             fi
-            sleep 5
+            echo "waiting for npm to serve dsh-rayrun-computer@$VERSION (attempt $attempt/30)"
+            sleep 10
           done
           echo "::error::npm does not serve dsh-rayrun-computer@$VERSION yet"
           exit 1
