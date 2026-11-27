@@ -177,7 +177,7 @@ Available from **`1.3.0`**. A host that manages an existing machine can rotate i
 | --- | --- | --- |
 | `credentials.save` / `modelCredential.save` | `modelKey` (or `secret`), optional `name`, optional `provider` | `credential: { name, provider }`, `modelCredential: { name, provider }`, `created` |
 
-- `name` defaults to the plugin's host credential (`dsh-model-<host>`). To rotate the key of an existing machine, pass one of the binding names from `machine.credentials` (see `overview` / `machine.get`). The key is forwarded to Rayrun only; it is never returned or written to plugin settings.
+- `name` defaults to the plugin's host credential (`dsh-model-<host>`). To rotate the key of an existing machine, pass one of the binding names from `machine.credentials` (see `overview` / `machine.get`). The key is forwarded to Rayrun only; it is never returned or written to plugin settings. With no `name`, the saved credential becomes the plugin's default model credential for later creates; an explicit `name` only rotates that binding.
 - `provider` defaults to `deepseek` and is validated by Rayrun against its built-in provider list.
 - `created` is `true` when the pre-write list did not contain the name, `false` when it did, and `null` when the pre-list failed. `machine.create` uses it to avoid deleting a shared credential.
 

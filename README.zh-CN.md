@@ -177,7 +177,7 @@ Runtime 错误新增 `invalid_runtime_name`、`invalid_runtime_spec`、`runtime_
 | --- | --- | --- |
 | `credentials.save` / `modelCredential.save` | `modelKey`（或 `secret`）、可选 `name`、可选 `provider` | `credential: { name, provider }`、`modelCredential: { name, provider }`、`created` |
 
-- `name` 缺省为插件在本机的凭证名（`dsh-model-<host>`）。要轮换已有机器绑定的 key，传入 `machine.credentials` 里的绑定名（见 `overview` / `machine.get`）。key 只转发给 Rayrun，不回显、不写入插件设置。
+- `name` 缺省为插件在本机的凭证名（`dsh-model-<host>`）。要轮换已有机器绑定的 key，传入 `machine.credentials` 里的绑定名（见 `overview` / `machine.get`）。key 只转发给 Rayrun，不回显、不写入插件设置。不传 `name` 时，保存的凭证会成为插件后续创建机器的默认模型凭证；传了 `name` 只轮换该绑定，不改变默认。
 - `provider` 缺省为 `deepseek`，由 Rayrun 按其内置厂商目录校验。
 - `created` 在写入前列表中没有该名字时为 `true`，已存在为 `false`，预查失败为 `null`；`machine.create` 用它避免删掉共享凭证。
 

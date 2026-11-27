@@ -226,6 +226,14 @@ check('credentials.save writes a model credential without creating a machine', a
     assert.equal(cloud.creates.length, 0)
   })
 
+  check('an explicit binding name does not replace the default', async () => {
+    const reply = await rpc({ action: 'machine.create', name: 'default-box', remote_desktop: false })
+    assert.equal(reply.json.ok, true)
+    const body = cloud.creates.at(-1).body
+    assert.ok(body.credentials.includes(defaultName))
+    assert.equal(body.credentials.includes('machine-binding'), false)
+  })
+
   check('credentials.save validates its inputs before the API', async () => {
     const before = cloud.posts.length
     const blank = await rpc({ action: 'credentials.save', modelKey: '   ' })
@@ -240,7 +248,8 @@ check('credentials.save writes a model credential without creating a machine', a
   check('a failed create removes only the credential this call created', async () => {
     cloud.credentials.delete(defaultName)
     cloud.createMode = 'fail'
-    const before = cloud.deletes.length
+    const beforeDeletes = cloud.deletes.length
+    const beforeCreates = cloud.creates.length
     const reply = await rpc({
       action: 'machine.create',
       name: 'cleanup-box',
@@ -249,9 +258,9 @@ check('credentials.save writes a model credential without creating a machine', a
     })
     assert.equal(reply.json.ok, false)
     assert.equal(reply.json.error.code, 'invalid_request')
-    assert.equal(cloud.creates.length, 1)
+    assert.equal(cloud.creates.length, beforeCreates + 1)
     assert.equal(cloud.credentials.has(defaultName), false, 'the new credential was removed')
-    assert.deepEqual(cloud.deletes.slice(before), [defaultName])
+    assert.deepEqual(cloud.deletes.slice(beforeDeletes), [defaultName])
     cloud.createMode = 'ok'
   })
 
