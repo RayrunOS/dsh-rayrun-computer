@@ -25,3 +25,12 @@ console.log('missing en:', [...used].filter((key) => !en.has(key)).sort().join('
 console.log('zh only:', [...zh].filter((key) => !en.has(key)).join(', ') || 'none')
 console.log('en only:', [...en].filter((key) => !zh.has(key)).join(', ') || 'none')
 console.log('unused zh:', [...zh].filter((key) => !used.has(key)).sort().join(', ') || 'none')
+
+// DSH 0.2.2-rc.5 exposes the selected language as `active`; the client must
+// declare the locale dependency as well, or the service is not ready when the
+// labels are registered.
+const localeInjected = /inject:\s*\[\s*'slots'\s*,\s*'locale'\s*\]/.test(src)
+const localeActive = /snapshot\?\.active\s*\?\?\s*snapshot\?\.id/.test(src)
+const localeWiring = localeInjected && localeActive
+console.log('client locale:', localeWiring ? 'ok' : 'missing (inject locale + read .active)')
+if (!localeWiring) process.exitCode = 1

@@ -76,6 +76,12 @@ window.__ModuleLoader__.load({
       return data
     }
 
+    /** One key per create dialog; retries reuse it so the platform can replay. */
+    function newIdempotencyKey() {
+      const uuid = globalThis.crypto?.randomUUID?.()
+      return uuid ? `dsh-create-${uuid}` : `dsh-create-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`
+    }
+
     function errorText(error, t) {
       if (!error) return ''
       if (error.code === 'network') return t.errNetwork
@@ -765,7 +771,8 @@ window.__ModuleLoader__.load({
     function english(ctx) {
       try {
         const locale = ctx.get?.('locale') ?? ctx.locale
-        const id = locale?.getLocale?.()?.id
+        const snapshot = locale?.getLocale?.()
+        const id = snapshot?.active ?? snapshot?.id
         return typeof id === 'string' && id.toLowerCase().startsWith('en')
       } catch {
         return false
@@ -776,7 +783,8 @@ window.__ModuleLoader__.load({
       const locale = ctx.get?.('locale') ?? ctx.locale
       const read = () => {
         try {
-          return String(locale?.getLocale?.()?.id ?? 'zh')
+          const snapshot = locale?.getLocale?.()
+          return String(snapshot?.active ?? snapshot?.id ?? 'zh')
         } catch {
           return 'zh'
         }
@@ -1410,6 +1418,7 @@ window.__ModuleLoader__.load({
       const [credential, setCredential] = useState(defaultCredential || '__none__')
       const [credentialList, setCredentialList] = useState(null)
       const [modelKey, setModelKey] = useState('')
+      const [idempotencyKey] = useState(newIdempotencyKey)
       const [busy, setBusy] = useState(false)
       const [error, setError] = useState('')
 
@@ -1447,7 +1456,14 @@ window.__ModuleLoader__.load({
         }
         setBusy(true)
         setError('')
-        const form = { name: trimmed, agent, cpu_cores: cpu, memory_mb: Math.max(2048, memory), remote_desktop: true }
+        const form = {
+          name: trimmed,
+          agent,
+          cpu_cores: cpu,
+          memory_mb: Math.max(2048, memory),
+          remote_desktop: true,
+          idempotency_key: idempotencyKey,
+        }
         if (credential === '__new__') {
           form.credentials = []
           if (modelKey.trim()) form.modelKey = modelKey.trim()
@@ -2448,7 +2464,7 @@ window.__ModuleLoader__.load({
     }
 
     return {
-      inject: ['slots'],
+      inject: ['slots', 'locale'],
       apply(ctx) {
         const panelLabel = () => (english(ctx) ? 'Cloud Computer' : '云电脑')
         ctx.slots.inject('sidebar.panellist', () =>
