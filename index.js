@@ -1212,6 +1212,21 @@ export function apply(ctx, config) {
               case 'credentials.list':
                 reply(res, 200, { ok: true, credentials: await ray.listCredentials() })
                 return
+              case 'credentials.save':
+              case 'modelCredential.save': {
+                const credential = await ray.saveCredential({
+                  name: body.name,
+                  provider: body.provider,
+                  secret: body.secret ?? body.modelKey,
+                })
+                reply(res, 200, {
+                  ok: true,
+                  credential: { name: credential.name, provider: credential.provider },
+                  modelCredential: { name: credential.name, provider: credential.provider },
+                  created: credential.created,
+                })
+                return
+              }
               case 'connection.save': {
                 const connection = await ray.saveConnection(body)
                 reply(res, 200, { ok: true, connection, ...(await storeModelCredential(body)) })
@@ -1243,14 +1258,7 @@ export function apply(ctx, config) {
                 reply(res, 200, { ok: true, connection: await logoutRayrun() })
                 return
               case 'machine.create': {
-                const input = { ...body }
-                if (String(body.modelKey ?? '').trim()) {
-                  // A key typed in the create dialog becomes this machine's credential.
-                  const created = await ray.ensureModelCredential(body.modelKey)
-                  const list = Array.isArray(body.credentials) ? body.credentials : []
-                  input.credentials = [...new Set([...list, created.name])]
-                }
-                const machine = await ray.createMachine(input)
+                const machine = await ray.createMachine(body)
                 reply(res, 200, { ok: true, machine })
                 return
               }

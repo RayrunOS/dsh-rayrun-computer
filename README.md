@@ -169,6 +169,22 @@ Return shapes:
 
 Runtime errors add `invalid_runtime_name`, `invalid_runtime_spec`, `runtime_not_found` and `runtimes_unavailable`, while `guestd_outdated`, `sandbox_not_running`, `sandbox_paused`, `invalid_request`, `resource_exhausted`, `runtime_sync_failed`, `service_unavailable`, `not_found` and `illegal_state` pass through from the platform.
 
+### Credential and create RPC
+
+Available from **`1.3.0`**. A host that manages an existing machine can rotate its model key without creating another machine.
+
+| Action | Input | Returns |
+| --- | --- | --- |
+| `credentials.save` / `modelCredential.save` | `modelKey` (or `secret`), optional `name`, optional `provider` | `credential: { name, provider }`, `modelCredential: { name, provider }`, `created` |
+
+- `name` defaults to the plugin's host credential (`dsh-model-<host>`). To rotate the key of an existing machine, pass one of the binding names from `machine.credentials` (see `overview` / `machine.get`). The key is forwarded to Rayrun only; it is never returned or written to plugin settings.
+- `provider` defaults to `deepseek` and is validated by Rayrun against its built-in provider list.
+- `created` is `true` when the pre-write list did not contain the name, `false` when it did, and `null` when the pre-list failed. `machine.create` uses it to avoid deleting a shared credential.
+
+`machine.create` accepts an optional `idempotency_key` (1–128 characters). The Host sends it as `Idempotency-Key` and reuses it for its own cold-start retry; the effective key is returned as `machine.idempotency_key`. A caller that retries after a timeout must reuse the same key to receive the platform's cached 201 instead of a second billed machine. When omitted, the Host generates a `dsh-create-…` key. The plugin's create dialog also generates one per dialog and reuses it across retries.
+
+Active sandbox names are unique per organization; a duplicate returns `name_conflict`. The platform's check is not atomic with the create, so the idempotency key is the stronger guard. If `machine.create` is called with `modelKey` and the platform definitely rejects the create (4xx or a destroyed cold start), a credential created by that same call is deleted; an existing credential and an ambiguous network failure are left alone.
+
 ## Configuration
 
 Bundle defaults live in `cordis.patch.yml`; override only what you need in your profile:

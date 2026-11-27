@@ -169,6 +169,22 @@ git clone https://github.com/RayrunOS/dsh-rayrun-computer.git
 
 Runtime 错误新增 `invalid_runtime_name`、`invalid_runtime_spec`、`runtime_not_found`、`runtimes_unavailable`；`guestd_outdated`、`sandbox_not_running`、`sandbox_paused`、`invalid_request`、`resource_exhausted`、`runtime_sync_failed`、`service_unavailable`、`not_found`、`illegal_state` 从平台透传。
 
+### 凭证与创建 RPC
+
+从 **`1.3.0`** 起可用。需要给已有机器轮换模型 key、但不新建机器的 host，可以调用：
+
+| 动作 | 输入 | 返回 |
+| --- | --- | --- |
+| `credentials.save` / `modelCredential.save` | `modelKey`（或 `secret`）、可选 `name`、可选 `provider` | `credential: { name, provider }`、`modelCredential: { name, provider }`、`created` |
+
+- `name` 缺省为插件在本机的凭证名（`dsh-model-<host>`）。要轮换已有机器绑定的 key，传入 `machine.credentials` 里的绑定名（见 `overview` / `machine.get`）。key 只转发给 Rayrun，不回显、不写入插件设置。
+- `provider` 缺省为 `deepseek`，由 Rayrun 按其内置厂商目录校验。
+- `created` 在写入前列表中没有该名字时为 `true`，已存在为 `false`，预查失败为 `null`；`machine.create` 用它避免删掉共享凭证。
+
+`machine.create` 接受可选的 `idempotency_key`（1–128 字符），Host 作为 `Idempotency-Key` 发送，并在自己的冷启动重试中复用；实际使用的 key 通过 `machine.idempotency_key` 返回。调用方超时重试时必须复用同一个 key，才能拿到平台缓存的 201，而不是再建一台计费机器。省略时 Host 生成 `dsh-create-…`；插件的创建对话框也会在每次打开时生成一个，并在重试中复用。
+
+同一组织内活跃沙箱名唯一；重名返回 `name_conflict`。平台的检查与创建不是原子的，幂等键是更强的保护。`machine.create` 带 `modelKey` 且平台明确拒绝创建（4xx 或冷启动被销毁）时，会删除本次新建的 credential；已存在的 credential 和网络结果不明的失败不删。
+
 ## 配置
 
 bundle 的默认值在 `cordis.patch.yml`；只覆盖你要改的键：
