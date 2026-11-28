@@ -51,6 +51,7 @@ node test/cloud-workspace.mjs   # 云端 workspace 解析、路径规则、push 
 node test/workspace-lock.mjs    # 单 writer 锁的获取/释放/冲突
 node test/context-pack.mjs      # handoff 目录结构与 secret 拦截
 node test/cloud-tool.mjs        # 用假上下文驱动真实 apply，断言 rayrun_dsh 注册形状与非法 action
+node test/file-resolve-cache.mjs # rayrun_files：30s 内复用 Running 机器、过期复查、409/503 重放一次
 node test/credential-rpc.mjs    # credentials.save、创建失败清理、Idempotency-Key 与重试
 node test/desktop.mjs           # rayrun_desktop：参数校验、X11 命令构造、截图解码、图片块渲染
 node test/async-delegate.mjs    # start/status/result：探针解析、产物取回、锁的释放时机

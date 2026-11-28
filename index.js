@@ -118,8 +118,15 @@ async function updateView(ctx) {
 
 /** In-flight sandbox resolutions, keyed by base URL + sandbox name. */
 const inflight = new Map()
-/** Resolved sandbox ids, so later calls reuse the same sandbox by id rather than by name. */
+/** Resolved sandboxes, so later calls reuse the same sandbox by id rather than by name. */
 const pinned = new Map()
+/**
+ * How long a file call may reuse a pinned Running machine without asking the
+ * platform again. File transfers dominate a cloud turn, and the status lookup
+ * doubled the request count of every one of them; a stopped machine still
+ * surfaces as a 409/503 and is re-resolved then.
+ */
+const MACHINE_STATUS_TTL_MS = 30_000
 
 function pick(value, fallback) {
   return value === undefined || value === null || value === '' ? fallback : value
@@ -927,8 +934,18 @@ export function apply(ctx, config) {
   }
 
 
+  /** A pinned machine plus when its Running status was last confirmed. */
+  const pin = (key, machine) => pinned.set(key, { id: machine.id, machine, at: Date.now() })
+
+  /** Drop every pin that points at this machine, so the next call re-resolves it. */
+  const forgetSandbox = (machine) => {
+    for (const [key, entry] of pinned) {
+      if (entry.id === machine.id) pinned.delete(key)
+    }
+  }
+
   /** Resolve the target sandbox, creating the configured default when needed. */
-  const resolveSandbox = async (ref, signal) => {
+  const resolveSandbox = async (ref, signal, options = {}) => {
     const connection = await ray.connection()
     const wanted = String(pick(ref, settings.sandboxName)).trim()
     const key = `${connection.baseUrl}#${wanted}`
@@ -936,7 +953,7 @@ export function apply(ctx, config) {
     const running = inflight.get(key)
     if (running) return running
 
-    const task = resolveOnce(wanted, key, signal)
+    const task = resolveOnce(wanted, key, signal, options.trustMs ?? 0)
     inflight.set(key, task)
     try {
       return await task
@@ -945,14 +962,24 @@ export function apply(ctx, config) {
     }
   }
 
-  const resolveOnce = async (wanted, key, signal) => {
-    const pinnedId = pinned.get(key)
-    if (pinnedId) {
+  const resolveOnce = async (wanted, key, signal, trustMs) => {
+    const cached = pinned.get(key)
+    if (cached) {
+      // A file call may trust a recently confirmed Running machine; every other
+      // caller keeps the full check so a machine stopped since the last call is
+      // woken before it is used.
+      if (trustMs > 0 && cached.machine.status === 'Running' && Date.now() - cached.at < trustMs) {
+        return cached.machine
+      }
       try {
-        const byId = await ray.machine(pinnedId)
+        const byId = await ray.machine(cached.id)
         // A destroyed sandbox still answers GET with status "Terminated"; reusing
         // it makes every later call fail with "sandbox_not_running".
-        if (byId && byId.status !== 'Terminated') return ray.wake(byId, signal)
+        if (byId && byId.status !== 'Terminated') {
+          const awake = await ray.wake(byId, signal)
+          pin(key, awake)
+          return awake
+        }
       } catch {
         // fall through to a fresh lookup
       }
@@ -961,8 +988,9 @@ export function apply(ctx, config) {
 
     const found = (await ray.listMachines()).find((item) => item.id === wanted || item.name === wanted)
     if (found) {
-      pinned.set(key, found.id)
-      return ray.wake(found, signal)
+      const awake = await ray.wake(found, signal)
+      pin(key, awake)
+      return awake
     }
 
     if (!settings.autoCreate) {
@@ -983,15 +1011,16 @@ export function apply(ctx, config) {
         credentials: settings.credentials,
         remote_desktop: settings.remoteDesktop,
       })
-      pinned.set(key, created.id)
+      pin(key, created)
       return created
     } catch (error) {
       // Another process may have created it between the list and the create.
       if (error instanceof RayrunError && (error.status === 409 || /name_conflict/.test(error.code))) {
         const winner = (await ray.listMachines()).find((item) => item.name === wanted)
         if (winner) {
-          pinned.set(key, winner.id)
-          return ray.wake(winner, signal)
+          const awake = await ray.wake(winner, signal)
+          pin(key, awake)
+          return awake
         }
       }
       throw error
@@ -1006,6 +1035,29 @@ export function apply(ctx, config) {
       throw new LocalError('sandbox_missing', `Cloud computer "${wanted}" does not exist.`)
     }
     return found
+  }
+
+  /**
+   * Run one file operation on a machine whose Running status was confirmed
+   * recently. Moving a file is idempotent, so a 409/503 from a sandbox that
+   * stopped inside the trust window is safe to refresh and replay once; a 404
+   * only drops the pin, because it is also how a missing file answers.
+   */
+  const withFileMachine = async (ref, signal, run) => {
+    let machine = await resolveSandbox(ref, signal, { trustMs: MACHINE_STATUS_TTL_MS })
+    try {
+      return { machine, value: await run(machine) }
+    } catch (error) {
+      if (!(error instanceof RayrunError)) throw error
+      if (error.status === 404) {
+        forgetSandbox(machine)
+        throw error
+      }
+      if (error.status !== 409 && error.code !== 'sandbox_paused') throw error
+      forgetSandbox(machine)
+      machine = await resolveSandbox(ref, signal)
+      return { machine, value: await run(machine) }
+    }
   }
 
   /**
@@ -1840,9 +1892,10 @@ export function apply(ctx, config) {
     },
     async execute(args, exec) {
       const action = String(args.action)
-      const machine = await resolveSandbox(args.sandbox, exec.signal)
       if (action === 'list') {
-        const listing = await ray.listFiles(machine.id, String(args.path ?? ''))
+        const { value: listing } = await withFileMachine(args.sandbox, exec.signal, (machine) =>
+          ray.listFiles(machine.id, String(args.path ?? '')),
+        )
         const entries = Array.isArray(listing?.entries) ? listing.entries : []
         if (entries.length === 0) return `${args.path || '/'}: empty`
         return entries
@@ -1854,11 +1907,15 @@ export function apply(ctx, config) {
         const target = String(args.path).replace(/^\/+/, '')
         const payload =
           typeof args.text === 'string' ? Buffer.from(args.text, 'utf8') : await readFile(localPath(args.local_path, exec.agent))
-        await ray.uploadFile(machine.id, target, payload, exec.signal)
+        const { machine } = await withFileMachine(args.sandbox, exec.signal, (targetMachine) =>
+          ray.uploadFile(targetMachine.id, target, payload, exec.signal),
+        )
         return `Uploaded ${payload.length} B to ${target} in ${machine.name ?? machine.id}.`
       }
       if (!String(args.path ?? '').replace(/^\/+/, '')) throw new Error('`path` is required for download.')
-      const res = await ray.downloadFile(machine.id, String(args.path), exec.signal)
+      const { value: res } = await withFileMachine(args.sandbox, exec.signal, (machine) =>
+        ray.downloadFile(machine.id, String(args.path), exec.signal),
+      )
       const bytes = Buffer.from(await res.arrayBuffer())
       if (args.local_path) {
         const destination = localPath(args.local_path, exec.agent)
