@@ -121,10 +121,10 @@ const inflight = new Map()
 /** Resolved sandboxes, so later calls reuse the same sandbox by id rather than by name. */
 const pinned = new Map()
 /**
- * How long a file call may reuse a pinned Running machine without asking the
- * platform again. File transfers dominate a cloud turn, and the status lookup
- * doubled the request count of every one of them; a stopped machine still
- * surfaces as a 409/503 and is re-resolved then.
+ * How long a file or runtime call may reuse a pinned Running machine without
+ * asking the platform again. Both paths run many small operations per cloud
+ * turn, and the status lookup doubled the request count of every one of them;
+ * a stopped machine still surfaces as a 409/503 and is re-resolved then.
  */
 const MACHINE_STATUS_TTL_MS = 30_000
 
@@ -944,6 +944,22 @@ export function apply(ctx, config) {
     }
   }
 
+  /**
+   * Prime the pin cache from an overview. The Bots turn asks for an overview
+   * before it touches a machine, so this makes the first file or runtime call
+   * of that turn skip its own machine lookup; a machine that stopped in between
+   * still fails with a sandbox error and is re-resolved then.
+   */
+  const pinOverview = (overview) => {
+    const baseUrl = overview?.connection?.baseUrl
+    if (!baseUrl || !Array.isArray(overview.machines)) return
+    for (const machine of overview.machines) {
+      if (!machine?.id) continue
+      pin(`${baseUrl}#${machine.id}`, machine)
+      if (machine.name) pin(`${baseUrl}#${machine.name}`, machine)
+    }
+  }
+
   /** Resolve the target sandbox, creating the configured default when needed. */
   const resolveSandbox = async (ref, signal, options = {}) => {
     const connection = await ray.connection()
@@ -1027,13 +1043,26 @@ export function apply(ctx, config) {
     }
   }
 
-  /** Look up a machine without creating one; lifecycle tools must not create by accident. */
+  /**
+   * Look up a machine without creating one; lifecycle tools must not create by
+   * accident. A Running machine confirmed recently is reused so the runtime RPCs
+   * do not pay a machine-list GET on every call; any later sandbox error drops
+   * the pin and the next lookup lists again.
+   */
   const resolveExisting = async (ref) => {
     const wanted = String(pick(ref, settings.sandboxName)).trim()
+    const connection = await ray.connection()
+    const key = `${connection.baseUrl}#${wanted}`
+    const cached = pinned.get(key)
+    if (cached && cached.machine.status === 'Running' && Date.now() - cached.at < MACHINE_STATUS_TTL_MS) {
+      return cached.machine
+    }
     const found = (await ray.listMachines()).find((item) => item.id === wanted || item.name === wanted)
     if (!found) {
+      pinned.delete(key)
       throw new LocalError('sandbox_missing', `Cloud computer "${wanted}" does not exist.`)
     }
+    pin(key, found)
     return found
   }
 
@@ -1125,6 +1154,16 @@ export function apply(ctx, config) {
     try {
       return await fn()
     } catch (error) {
+      // The cached Running state is wrong after a stop, pause or delete; the
+      // next lookup must list machines again. A missing runtime name also lands
+      // here, and the extra list it costs is harmless. A 409 from an unrelated
+      // runtime conflict (guestd_outdated) keeps the pin.
+      if (
+        error instanceof RayrunError &&
+        (error.code === 'sandbox_not_running' || error.code === 'sandbox_paused' || error.code === 'not_found')
+      ) {
+        forgetSandbox(machine)
+      }
       if (error instanceof RayrunError && error.code === 'http_404') {
         throw new RayrunError(
           404,
@@ -1193,7 +1232,9 @@ export function apply(ctx, config) {
                 return
               }
               if (action === 'overview') {
-                reply(res, 200, await ray.overview())
+                const data = await ray.overview()
+                pinOverview(data)
+                reply(res, 200, data)
                 return
               }
               if (action === 'task-target') {
@@ -1238,9 +1279,12 @@ export function apply(ctx, config) {
             const body = await readJsonBody(req)
             const action = String(body.action ?? '')
             switch (action) {
-              case 'overview':
-                reply(res, 200, await ray.overview())
+              case 'overview': {
+                const data = await ray.overview()
+                pinOverview(data)
+                reply(res, 200, data)
                 return
+              }
               case 'task.target.get':
                 reply(res, 200, {
                   ok: true,
